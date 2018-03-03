@@ -12,7 +12,7 @@ void main()
 	NeuralNetwork nn;
 
 	nn.Create();
-	nn.Train(10000);
+	nn.Train(1000);
 	nn.Test();
 	
 	getchar();

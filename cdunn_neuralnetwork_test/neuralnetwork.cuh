@@ -52,22 +52,22 @@ using namespace std;
     }																	\
 }
 
-/*
-//	FullyConnectedLayer
-//	全连接层类，包括所有全连接层相关的操作
-*/
-class FullyConnectedLayer
+class Layer
 {
 public:
 	friend class NeuralNetwork;
+	friend class ConvolutionLayer;
+	friend class MaxPoolLayer;
+	friend class FullyConnectedLayer;
+	friend class ActivationLayer;
+	friend class DataSet;
+	friend class OutputLayer;
 	int InputNumber;			// 输入层神经元个数
 	int OutputNumber;			// 输出层神经元个数
 	vector<float> ParamW;		// 参数w
 	vector<float> ParamB;		// 参数b
 
-	FullyConnectedLayer(int input_num, int output_num);
-	~FullyConnectedLayer();
-private:
+protected:
 	float *device_data;
 	float *device_param_w;
 	float *device_param_b;
@@ -75,8 +75,29 @@ private:
 	float *device_grad_b;
 	float *device_diff_data;
 
-	cudnnTensorDescriptor_t TensorDesc;	// 张量描述符
+	Layer *LastLayer;
+	cudnnHandle_t cudnnHandle;
+	cudnnTensorDescriptor_t TensorDesc;	
+	cudnnTensorDescriptor_t LastTensorDesc;
 
+	virtual inline void deviceMalloc(int batchsize) = 0;
+	virtual inline void deviceFree() = 0;
+	virtual inline void CreateDescriptor(int batchsize) = 0;
+	virtual inline void DestroyDescriptor() = 0;
+};
+
+/*
+//	FullyConnectedLayer
+//	全连接层类，包括所有全连接层相关的操作
+*/
+class FullyConnectedLayer : public Layer
+{
+public:
+	friend class NeuralNetwork;
+
+	FullyConnectedLayer(Layer *lastlayer, int input_num, int output_num);
+	~FullyConnectedLayer();
+private:
 	inline void deviceMalloc(int batchsize);
 	inline void deviceFree();
 	inline void CreateDescriptor(int batchsize);
@@ -87,22 +108,14 @@ private:
 //	ActivationLayer
 //	激活层类，包括所有激活层相关的操作
 */
-class ActivationLayer
+class ActivationLayer : public Layer
 {
 public:
 	friend class NeuralNetwork;
 	int Number;
-	ActivationLayer(
-		int num,
-		cudnnActivationMode_t mode = CUDNN_ACTIVATION_RELU,
-		cudnnNanPropagation_t nanopt = CUDNN_PROPAGATE_NAN,
-		double coef = 0.0
-	);
+	ActivationLayer(Layer *lastlayer, int num, cudnnActivationMode_t mode = CUDNN_ACTIVATION_RELU, cudnnNanPropagation_t nanopt = CUDNN_PROPAGATE_NAN, double coef = 0.0);
 	~ActivationLayer();
 private:
-	float *device_data;
-	float *device_diff_data;
-
 	double Coef;
 	cudnnActivationMode_t ActivationMode;
 	cudnnNanPropagation_t NanOption;
@@ -118,7 +131,7 @@ private:
 //	ConvolutionLayer
 //	卷积层类，包括所有卷积层相关的操作
 */
-class ConvolutionLayer
+class ConvolutionLayer : public Layer
 {
 public:
 	friend class NeuralNetwork;
@@ -132,20 +145,11 @@ public:
 	int Padding;
 	int Stride;
 
-	vector<float> ParamW;	// 参数w
-	vector<float> ParamB;	// 参数b
-
-	ConvolutionLayer(cudnnHandle_t cudnnhandle, cudnnTensorDescriptor_t lastTensorDesc, int in_channels, int out_channels, int kernel_size, int in_width, int in_height, int padding = 0, int stride = 1);
+	ConvolutionLayer(Layer *lastlayer, cudnnHandle_t cudnnhandle, int in_channels, int out_channels, int kernel_size, int in_width, int in_height, int padding = 0, int stride = 1);
 	~ConvolutionLayer();
-private:
-	float *device_data;
-	float *device_param_w;
-	float *device_param_b;
-	float *device_grad_w;
-	float *device_grad_b;
-	float *device_diff_data;
 
-	cudnnTensorDescriptor_t TensorDesc;				// 张量描述符
+	inline void ForwardPropagate(void *device_workspace, size_t WorkspaceSize);
+private:
 	cudnnTensorDescriptor_t BiasTensorDesc;			// 张量描述符
 	cudnnFilterDescriptor_t FilterDesc;				// 滤波器描述符
 	cudnnConvolutionDescriptor_t ConvDesc;			// 卷积器描述符
@@ -153,11 +157,7 @@ private:
 	cudnnConvolutionBwdFilterAlgo_t BwdAlgDesc;		// 反向传播算法描述符
 	cudnnConvolutionBwdDataAlgo_t BwdDataAlgDesc;	// 反向传播数据算法描述符
 
-	cudnnHandle_t cudnnHandle;
-	cudnnTensorDescriptor_t LastTensorDesc;
-
 	size_t WorkspaceSize = 0;
-
 
 	inline void deviceMalloc(int batchsize);
 	inline void deviceFree();
@@ -172,26 +172,22 @@ private:
 //	MaxPoolLayer
 //	池化层类，包括所有池化层相关的操作
 */
-class MaxPoolLayer
+class MaxPoolLayer : public Layer
 {
 public:
 	friend class NeuralNetwork;
-	int Size;
-	int Stride;
-	
-	MaxPoolLayer(int size, int stride, ConvolutionLayer &lastConv);
-	~MaxPoolLayer();
-private:
-	float *device_data;
-	float *device_diff_data;
 	int OutputWidth;
 	int OutputHeight;
 	int OutputChannels;
+	int Size;
+	int Stride;
+	
+	MaxPoolLayer(Layer *lastlayer, cudnnHandle_t cudnnhandle, int size, int stride, ConvolutionLayer &lastConv);
+	~MaxPoolLayer();
 
-	cudnnTensorDescriptor_t TensorDesc;		// 张量描述符
+	inline void ForwardPropagate();
+private:
 	cudnnPoolingDescriptor_t PoolDesc;		// 池化描述符
-
-	cudnnHandle_t cudnnHandle;
 
 	inline void deviceMalloc(int batchsize);
 	inline void deviceFree();
@@ -199,7 +195,7 @@ private:
 	inline void DestroyDescriptor();
 };
 
-class DataSet
+class DataSet : public Layer
 {
 public:
 	friend class NeuralNetwork;
@@ -209,11 +205,7 @@ public:
 	size_t Width;
 	size_t Height;
 	size_t Channels = 1;
-
-	string TrainingSetName = "train-images.idx3-ubyte";
-	string TrainingLabelsName = "train-labels.idx1-ubyte";
-	string TestSetName = "t10k-images.idx3-ubyte";
-	string TestLabelsName = "t10k-labels.idx1-ubyte";
+	
 
 	vector<uint8_t> TrainSet;
 	vector<uint8_t> TrainLabels;
@@ -223,10 +215,13 @@ public:
 	vector<float>	TrainLabels_float;
 
 private:
-	float *device_data;
 	float *device_labels;
 
-	cudnnTensorDescriptor_t TensorDesc;
+	string TrainingSetName = "train-images.idx3-ubyte";
+	string TrainingLabelsName = "train-labels.idx1-ubyte";
+	string TestSetName = "t10k-images.idx3-ubyte";
+	string TestLabelsName = "t10k-labels.idx1-ubyte";
+
 
 	size_t TrainSize;
 	size_t TestSize;
@@ -237,19 +232,17 @@ private:
 	inline void DestroyDescriptor();
 };
 
-class OutputLayer
+class OutputLayer : public Layer
 {
 public:
 	friend class NeuralNetwork;
 
-	OutputLayer(int num);
+	OutputLayer(Layer *lastlayer, int num);
 	~OutputLayer();
 
 	size_t Number;
 
 private:
-	float *device_data;
-	float *device_diff_data;
 	float *device_loss_data;
 
 	inline void deviceMalloc(int batchsize);
