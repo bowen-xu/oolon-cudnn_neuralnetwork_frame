@@ -77,6 +77,7 @@ protected:
 
 	Layer *LastLayer;
 	cudnnHandle_t cudnnHandle;
+	cublasHandle_t cublasHandle;
 	cudnnTensorDescriptor_t TensorDesc;	
 	cudnnTensorDescriptor_t LastTensorDesc;
 
@@ -95,8 +96,12 @@ class FullyConnectedLayer : public Layer
 public:
 	friend class NeuralNetwork;
 
-	FullyConnectedLayer(Layer *lastlayer, int input_num, int output_num);
+	FullyConnectedLayer(Layer *lastlayer, cublasHandle_t cublashandle, int input_num, int output_num);
 	~FullyConnectedLayer();
+
+	inline void ForwardPropagate(float *device_ones);
+	inline void BackPropagate(float* diff, float* device_ones, bool isFirstLayer = false);
+	inline void UpdateWeights(float learning_rate);
 private:
 	inline void deviceMalloc(int batchsize);
 	inline void deviceFree();
@@ -113,8 +118,11 @@ class ActivationLayer : public Layer
 public:
 	friend class NeuralNetwork;
 	int Number;
-	ActivationLayer(Layer *lastlayer, int num, cudnnActivationMode_t mode = CUDNN_ACTIVATION_RELU, cudnnNanPropagation_t nanopt = CUDNN_PROPAGATE_NAN, double coef = 0.0);
+	ActivationLayer(Layer *lastlayer, cudnnHandle_t cudnnhandle, int num, cudnnActivationMode_t mode = CUDNN_ACTIVATION_RELU, cudnnNanPropagation_t nanopt = CUDNN_PROPAGATE_NAN, double coef = 0.0);
 	~ActivationLayer();
+
+	inline void ForwardPropagate();
+	inline void BackPropagate(float *diff, bool isFirstLayer = false);
 private:
 	double Coef;
 	cudnnActivationMode_t ActivationMode;
@@ -145,10 +153,12 @@ public:
 	int Padding;
 	int Stride;
 
-	ConvolutionLayer(Layer *lastlayer, cudnnHandle_t cudnnhandle, int in_channels, int out_channels, int kernel_size, int in_width, int in_height, int padding = 0, int stride = 1);
+	ConvolutionLayer(Layer *lastlayer, cudnnHandle_t cudnnhandle, cublasHandle_t cublashandle, int in_channels, int out_channels, int kernel_size, int in_width, int in_height, int padding = 0, int stride = 1);
 	~ConvolutionLayer();
 
 	inline void ForwardPropagate(void *device_workspace, size_t WorkspaceSize);
+	inline void BackPropagate(float *diff, void *workspace, size_t workspacesize, bool isFistLayer = false);
+	inline void UpdateWeights(float learning_rate);
 private:
 	cudnnTensorDescriptor_t BiasTensorDesc;			// ÕÅÁ¿ÃèÊö·û
 	cudnnFilterDescriptor_t FilterDesc;				// ÂË²¨Æ÷ÃèÊö·û
@@ -186,6 +196,7 @@ public:
 	~MaxPoolLayer();
 
 	inline void ForwardPropagate();
+	inline void BackPropagate(float *diff, bool isFirstLayer = false);
 private:
 	cudnnPoolingDescriptor_t PoolDesc;		// ³Ø»¯ÃèÊö·û
 
@@ -237,8 +248,11 @@ class OutputLayer : public Layer
 public:
 	friend class NeuralNetwork;
 
-	OutputLayer(Layer *lastlayer, int num);
+	OutputLayer(Layer *lastlayer, cudnnHandle_t cudnnhandle, cublasHandle_t cublashandle, int num);
 	~OutputLayer();
+
+	inline void ForwardPropagate();
+	inline void BackPropagate(float* device_labels);
 
 	size_t Number;
 
