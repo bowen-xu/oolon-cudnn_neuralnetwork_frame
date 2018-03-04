@@ -32,6 +32,7 @@ using namespace std;
     _message << std::string(s) + "\n" << __FILE__ << ':' << __LINE__;	\
     std::cerr << _message.str() << "\nAborting...\n";					\
     cudaDeviceReset();													\
+	getchar();															\
     exit(1);															\
 }
 
@@ -224,9 +225,9 @@ public:
 	inline size_t getTrainSize() { return TrainSize; }
 	inline size_t getTestSize() { return TestSize; }
 
-	inline void ForwardPropagate();
-	inline void BackPropagate(bool isFirstLayer = false) {}
-	inline void UpdateWeights(float learning_rate) {}
+	//inline void ForwardPropagate();
+	//inline void BackPropagate(bool isFirstLayer = false) {}
+	//inline void UpdateWeights(float learning_rate) {}
 private:
 	float *device_labels;
 

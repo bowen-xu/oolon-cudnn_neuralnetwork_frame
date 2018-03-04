@@ -545,20 +545,20 @@ DataSet::~DataSet()
 	deviceFree();
 }
 
-inline void DataSet::ForwardPropagate()
-{
-	static int iter = 0;
-	int imageid = iter % (TrainSize / BATCH_SIZE);
-	iter++;
-	/*checkCudaErrors(cudaMemcpyAsync(device_data, &((TrainSet_float)[imageid * BATCH_SIZE * OutputNumber]),
-		sizeof(float) * BATCH_SIZE * OutputNumber, cudaMemcpyHostToDevice));
-	checkCudaErrors(cudaMemcpyAsync(device_labels, &((TrainLabels_float)[imageid * BATCH_SIZE]),
-		sizeof(float) * BATCH_SIZE, cudaMemcpyHostToDevice));*/
-	checkCudaErrors(cudaMemcpyAsync(device_data, &((TrainSet_float)[imageid * BATCH_SIZE * OutputNumber]),
-		sizeof(float) * BATCH_SIZE * OutputNumber, cudaMemcpyHostToDevice));
-	checkCudaErrors(cudaMemcpyAsync(device_labels, &((TrainLabels_float)[imageid * BATCH_SIZE]),
-		sizeof(float) * BATCH_SIZE, cudaMemcpyHostToDevice));
-}
+//inline void DataSet::ForwardPropagate()
+//{
+//	static int iter = 0;
+//	iter++;
+//	int imageid = iter % (TrainSize / BATCH_SIZE);
+//	/*checkCudaErrors(cudaMemcpyAsync(device_data, &((TrainSet_float)[imageid * BATCH_SIZE * OutputNumber]),
+//		sizeof(float) * BATCH_SIZE * OutputNumber, cudaMemcpyHostToDevice));
+//	checkCudaErrors(cudaMemcpyAsync(device_labels, &((TrainLabels_float)[imageid * BATCH_SIZE]),
+//		sizeof(float) * BATCH_SIZE, cudaMemcpyHostToDevice));*/
+//	checkCudaErrors(cudaMemcpyAsync(device_data, &((TrainSet_float)[imageid * BATCH_SIZE * OutputNumber]),
+//		sizeof(float) * BATCH_SIZE * OutputNumber, cudaMemcpyHostToDevice));
+//	checkCudaErrors(cudaMemcpyAsync(device_labels, &((TrainLabels_float)[imageid * BATCH_SIZE]),
+//		sizeof(float) * BATCH_SIZE, cudaMemcpyHostToDevice));
+//}
 
 inline void DataSet::deviceMalloc(int batchsize)
 {
@@ -722,8 +722,19 @@ void NeuralNetwork::Train(int iterations)
 	printf("Training...\n");
 	checkCudaErrors(cudaDeviceSynchronize());
 	auto t1 = std::chrono::high_resolution_clock::now();
+
+	size_t train_size = Image->getTrainSize();
+	float *device_data = Image->getData();
+
 	for (int iter = 0; iter < iterations; ++iter)
 	{
+		int imageid = iter % (train_size / BATCH_SIZE);
+		checkCudaErrors(cudaMemcpyAsync(device_data, &((Image->TrainSet_float)[imageid * BATCH_SIZE * Image->getOutputNumber()]),
+			sizeof(float) * BATCH_SIZE * Image->getOutputNumber(), cudaMemcpyHostToDevice));
+		checkCudaErrors(cudaMemcpyAsync(device_labels, &((Image->TrainLabels_float)[imageid * BATCH_SIZE]),
+			sizeof(float) * BATCH_SIZE, cudaMemcpyHostToDevice));
+
+
 		// Forward propagation
 		ForwardPropagate();
 
@@ -804,10 +815,7 @@ void NeuralNetwork::ForwardPropagate()
 {
 	static float alpha = 1.0f, beta = 0.0f;
 	checkCudaErrors(cudaSetDevice(GPUid));
-
-	// Dataset
-	Image->ForwardPropagate();
-
+	
 	// Conv1 layer
 	Conv1->ForwardPropagate();
 
@@ -830,6 +838,7 @@ void NeuralNetwork::ForwardPropagate()
 
 	// FC2 layer
 	FC2->ForwardPropagate();
+
 
 	// Softmax loss
 	RSLT->ForwardPropagate();
@@ -883,6 +892,7 @@ void NeuralNetwork::UpdateWeights(float learning_rate)
 
 	// Fully connected 2
 	FC2->UpdateWeights(learning_rate);
+
 }
 
 
