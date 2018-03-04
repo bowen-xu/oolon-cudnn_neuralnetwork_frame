@@ -74,6 +74,10 @@ public:
 
 	inline int getOutputNumber() { return OutputNumber; }
 	inline float *getData() { return device_data; }
+
+	virtual inline void ForwardPropagate() = 0;
+	virtual inline void BackPropagate(bool isFirstLayer = false) = 0;
+	virtual inline void UpdateWeights(float learning_rate) = 0;
 protected:
 	int InputNumber;			// 输入层神经元个数
 	int OutputNumber;			// 输出层神经元个数
@@ -225,9 +229,9 @@ public:
 	inline size_t getTrainSize() { return TrainSize; }
 	inline size_t getTestSize() { return TestSize; }
 
-	//inline void ForwardPropagate();
-	//inline void BackPropagate(bool isFirstLayer = false) {}
-	//inline void UpdateWeights(float learning_rate) {}
+	inline void ForwardPropagate() {}
+	inline void BackPropagate(bool isFirstLayer = false) {}
+	inline void UpdateWeights(float learning_rate) {}
 private:
 	float *device_labels;
 
@@ -253,7 +257,7 @@ public:
 	~OutputLayer();
 
 	inline void ForwardPropagate();
-	inline void BackPropagate();
+	inline void BackPropagate(bool isFirstLayer = false);
 	inline void UpdateWeights(float learning_rate) {}
 
 private:
@@ -281,6 +285,13 @@ public:
 	void Train(int iterations);
 	void Test();
 	void Destroy();
+
+	void AddData(DataSet *dataset);
+	void AddLayer(Layer *layer);
+	
+	DataSet				*Data;
+	vector<Layer*>		Layers;
+
 private:
 	int GPUid = 0;
 	cudnnHandle_t cudnnHandle;
@@ -290,15 +301,7 @@ private:
 	size_t WorkspaceSize = 0;
 	void *device_workspace = nullptr;
 
-	DataSet				*Image;
-	ConvolutionLayer	*Conv1;
-	MaxPoolLayer		*Pool1;
-	ConvolutionLayer	*Conv2;
-	MaxPoolLayer		*Pool2;
-	FullyConnectedLayer	*FC1;
-	ActivationLayer		*ACTN1;
-	FullyConnectedLayer	*FC2;
-	OutputLayer			*RSLT;
+	
 
 
 	void ForwardPropagate();

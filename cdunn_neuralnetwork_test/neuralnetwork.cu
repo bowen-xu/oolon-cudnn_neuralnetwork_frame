@@ -104,10 +104,10 @@ inline void FullyConnectedLayer::ForwardPropagate()
 inline void FullyConnectedLayer::BackPropagate(bool isFirstLayer)
 {
 	static float alpha = 1.0f, beta = 0.0f;
-	// Compute derivative with respect to weights: gfc2 = (fc1relu * dfc2smax')
+	
 	checkCudaErrors(cublasSgemm(neuralNetwork->cublasHandle, CUBLAS_OP_N, CUBLAS_OP_T, InputNumber, OutputNumber, BATCH_SIZE,
 		&alpha, LastLayer->device_data, InputNumber, NextLayer->device_diff_data, OutputNumber, &beta, device_grad_w, InputNumber));
-	// Compute derivative with respect to bias: gfc2bias = dfc2smax * 1_vec
+	
 	checkCudaErrors(cublasSgemv(neuralNetwork->cublasHandle, CUBLAS_OP_N, OutputNumber, BATCH_SIZE,
 		&alpha, NextLayer->device_diff_data, OutputNumber, neuralNetwork->device_ones, 1, &beta, device_grad_b, 1));
 	// Compute derivative with respect to data (for previous layer): pfc2*dfc2smax (500x10*10xN)
@@ -621,10 +621,10 @@ inline void OutputLayer::ForwardPropagate()
 		&alpha, LastLayer->TensorDesc, LastLayer->device_data, &beta, LastLayer->TensorDesc, device_data));
 }
 
-inline void OutputLayer::BackPropagate()
+inline void OutputLayer::BackPropagate(bool isFirstLayer)
 {
 	static float scalVal = 1.0f / static_cast<float>(BATCH_SIZE);
-
+	static float alpha = 1.0f, beta = 0.0f;
 	// Initialization (using the training error function)
 	checkCudaErrors(cudaMemcpyAsync(device_diff_data, device_data, sizeof(float) * BATCH_SIZE * LastLayer->OutputNumber, cudaMemcpyDeviceToDevice));
 
@@ -633,7 +633,6 @@ inline void OutputLayer::BackPropagate()
 
 	// Accounting for batch size in SGD
 	checkCudaErrors(cublasSscal(neuralNetwork->cublasHandle, LastLayer->OutputNumber * BATCH_SIZE, &scalVal, device_diff_data, 1));
-
 }
 
 inline void OutputLayer::deviceMalloc(int batchsize)
@@ -679,9 +678,19 @@ NeuralNetwork::NeuralNetwork()
 	checkCUDNN(cudnnCreate(&cudnnHandle));
 }
 
+void NeuralNetwork::AddData(DataSet *dataset)
+{
+	Data = dataset;
+}
+
+void NeuralNetwork::AddLayer(Layer *layer)
+{
+	Layers.push_back(layer);
+}
+
 void NeuralNetwork::Create()
 {
-	Image = new DataSet();
+	/*Image = new DataSet();
 	Conv1 = new ConvolutionLayer(this, Image, 20, 5);
 	Pool1 = new MaxPoolLayer(this, Conv1, 2, 2);
 	Conv2 = new ConvolutionLayer(this, Pool1, 50, 5);
@@ -689,9 +698,9 @@ void NeuralNetwork::Create()
 	FC1 = new FullyConnectedLayer(this, Pool2, 500);
 	ACTN1 = new ActivationLayer(this, FC1);
 	FC2 = new FullyConnectedLayer(this, ACTN1, 10);
-	RSLT = new OutputLayer(this, FC2);
+	RSLT = new OutputLayer(this, FC2);*/
 	
-	device_labels = Image->getLabels();
+	device_labels = Data->getLabels();
 	checkCudaErrors(cudaMalloc(&device_ones, sizeof(float)* BATCH_SIZE));
 	FillOnes <<<RoundUp(BATCH_SIZE, BW), BW>>> (device_ones, BATCH_SIZE);
 	if (WorkspaceSize > 0)
@@ -701,15 +710,20 @@ void NeuralNetwork::Create()
 
 void NeuralNetwork::Destroy()
 {
-	delete Image;
-	delete Conv1;
-	delete Pool1;
-	delete Conv2;
-	delete Pool2;
-	delete FC1;
-	delete ACTN1;
-	delete FC2;
-	delete RSLT;
+	delete Data;
+	while (!Layers.empty())
+	{
+		Layers.clear();
+	}
+	//delete Image;
+	//delete Conv1;
+	//delete Pool1;
+	//delete Conv2;
+	//delete Pool2;
+	//delete FC1;
+	//delete ACTN1;
+	//delete FC2;
+	//delete RSLT;
 
 	checkCudaErrors(cudaFree(device_ones));
 	if (device_workspace != nullptr)
@@ -723,15 +737,15 @@ void NeuralNetwork::Train(int iterations)
 	checkCudaErrors(cudaDeviceSynchronize());
 	auto t1 = std::chrono::high_resolution_clock::now();
 
-	size_t train_size = Image->getTrainSize();
-	float *device_data = Image->getData();
+	size_t train_size = Data->getTrainSize();
+	float *device_data = Data->getData();
 
 	for (int iter = 0; iter < iterations; ++iter)
 	{
 		int imageid = iter % (train_size / BATCH_SIZE);
-		checkCudaErrors(cudaMemcpyAsync(device_data, &((Image->TrainSet_float)[imageid * BATCH_SIZE * Image->getOutputNumber()]),
-			sizeof(float) * BATCH_SIZE * Image->getOutputNumber(), cudaMemcpyHostToDevice));
-		checkCudaErrors(cudaMemcpyAsync(device_labels, &((Image->TrainLabels_float)[imageid * BATCH_SIZE]),
+		checkCudaErrors(cudaMemcpyAsync(device_data, &((Data->TrainSet_float)[imageid * BATCH_SIZE * Data->getOutputNumber()]),
+			sizeof(float) * BATCH_SIZE * Data->getOutputNumber(), cudaMemcpyHostToDevice));
+		checkCudaErrors(cudaMemcpyAsync(device_labels, &((Data->TrainLabels_float)[imageid * BATCH_SIZE]),
 			sizeof(float) * BATCH_SIZE, cudaMemcpyHostToDevice));
 
 
@@ -759,7 +773,7 @@ void NeuralNetwork::Test()
 {
 	float classification_error = 1.0f;
 
-	int classifications = (int)(Image->getTestSize());
+	int classifications = (int)(Data->getTestSize());
 
 	// Test the resulting neural network's classification
 
@@ -776,12 +790,12 @@ void NeuralNetwork::Test()
 	int num_errors = 0;
 	for (int i = 0; i < classifications; ++i)
 	{
-		int output_number = Image->getOutputNumber();
-		float *device_data = Image->getData();
+		int output_number = Data->getOutputNumber();
+		float *device_data = Data->getData();
 		std::vector<float> data(output_number);
 		// Normalize image to be in [0,1]
 		for (int j = 0; j < output_number; ++j)
-			data[j] = (float)Image->TestSet[i * output_number + j] / 255.0f;
+			data[j] = (float)Data->TestSet[i * output_number + j] / 255.0f;
 
 		checkCudaErrors(cudaMemcpyAsync(device_data, &data[0], sizeof(float) * output_number, cudaMemcpyHostToDevice));
 
@@ -792,7 +806,7 @@ void NeuralNetwork::Test()
 		std::vector<float> class_vec(10);
 
 		// Copy back result
-		checkCudaErrors(cudaMemcpy(&class_vec[0], RSLT->getData(), sizeof(float) * 10, cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpy(&class_vec[0], Layers.back()->getData(), sizeof(float) * 10, cudaMemcpyDeviceToHost));
 
 		// Determine classification according to maximal response
 		int chosen = 0;
@@ -801,7 +815,7 @@ void NeuralNetwork::Test()
 			if (class_vec[chosen] < class_vec[id]) chosen = id;
 		}
 
-		if (chosen != Image->TestLabels[i])
+		if (chosen != Data->TestLabels[i])
 			++num_errors;
 	}
 	classification_error = (float)num_errors / (float)classifications;
@@ -816,82 +830,45 @@ void NeuralNetwork::ForwardPropagate()
 	static float alpha = 1.0f, beta = 0.0f;
 	checkCudaErrors(cudaSetDevice(GPUid));
 	
-	// Conv1 layer
-	Conv1->ForwardPropagate();
-
-	// Pool1 layer
-	Pool1->ForwardPropagate();
-
-	// Conv2 layer
-	Conv2->ForwardPropagate();
-
-	// Pool2 layer
-	Pool2->ForwardPropagate();
-
-	// FC1 layer
-	FC1->ForwardPropagate();
-
-
-	// ReLU activation
-	ACTN1->ForwardPropagate();
-
-
-	// FC2 layer
-	FC2->ForwardPropagate();
-
-
-	// Softmax loss
-	RSLT->ForwardPropagate();
+	int count = Layers.size();
+	for (int i = 0; i < count; i++)
+	{
+		(Layers[i])->ForwardPropagate();
+	}
 }
 
 void NeuralNetwork::BackPropagate()
 {
 	static float alpha = 1.0f, beta = 0.0f;
 
-	// Output layer
-	RSLT->BackPropagate();
-
-	// FC2 layer
-	FC2->BackPropagate();
-
-	// ReLU activation
-	ACTN1->BackPropagate();
-
-	// FC1 layer
-	FC1->BackPropagate();
-
-	// Pool2 layer
-	Pool2->BackPropagate();
-
-	// Conv2 layer
-	Conv2->BackPropagate();
-
-	// Pool1 layer
-	Pool1->BackPropagate();
-
-	// Conv1 layer
-	Conv1->BackPropagate(true);
-
-	// No need for convBackwardData because there are no more layers below
+	for (signed int i = Layers.size() - 1; i >= 0; i--)
+	{
+		Layers[i]->BackPropagate(i == 0);
+	}
 }
 
 void NeuralNetwork::UpdateWeights(float learning_rate)
 {
-	float alpha = -learning_rate;
+	//float alpha = -learning_rate;
 
 	checkCudaErrors(cudaSetDevice(GPUid));
 
-	// Conv1
-	Conv1->UpdateWeights(learning_rate);
+	int count = Layers.size();
+	for (int i = 0; i < count; i++)
+	{
+		Layers[i]->UpdateWeights(learning_rate);
+	}
+	//// Conv1
+	//Conv1->UpdateWeights(learning_rate);
 
-	// Conv2
-	Conv2->UpdateWeights(learning_rate);
+	//// Conv2
+	//Conv2->UpdateWeights(learning_rate);
 
-	// Fully connected 1
-	FC1->UpdateWeights(learning_rate);
+	//// Fully connected 1
+	//FC1->UpdateWeights(learning_rate);
 
-	// Fully connected 2
-	FC2->UpdateWeights(learning_rate);
+	//// Fully connected 2
+	//FC2->UpdateWeights(learning_rate);
 
 }
 
