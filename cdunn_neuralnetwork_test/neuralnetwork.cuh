@@ -281,6 +281,8 @@ public:
 	friend class OutputLayer;
 
 	NeuralNetwork();
+	~NeuralNetwork();
+
 	void Create();
 	void Train(int iterations);
 	void Test();

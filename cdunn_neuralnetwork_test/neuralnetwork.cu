@@ -31,7 +31,7 @@ __global__ void FillOnes(float *vec, int size)
 * @param batch_size The size of the trained batch.
 * @param diff The resulting gradient.
 */
-__global__ void SoftmaxLossBackprop(const float *label, int num_labels, int batch_size, float *diff)
+__global__ void SoftmaxLossBackprop(const float *label, const float *data, float *diff, int num_labels, int batch_size)
 {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx >= batch_size)
@@ -40,7 +40,7 @@ __global__ void SoftmaxLossBackprop(const float *label, int num_labels, int batc
 	const int label_value = static_cast<int>(label[idx]);
 
 	// For each item in the batch, decrease the result of the label's value by 1
-	diff[idx * num_labels + label_value] -= 1.0f;
+	diff[idx * num_labels + label_value] = data[idx * num_labels + label_value] - 1.0f;
 }
 
 
@@ -114,7 +114,7 @@ inline void FullyConnectedLayer::BackPropagate(bool isFirstLayer)
 	if (!isFirstLayer)
 	{
 		checkCudaErrors(cublasSgemm(neuralNetwork->cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N, InputNumber, BATCH_SIZE, OutputNumber,
-			&alpha, device_param_w, InputNumber, NextLayer->device_diff_data, OutputNumber, &beta, device_diff_data, InputNumber));
+			&alpha, device_param_w, InputNumber, NextLayer->device_diff_data, OutputNumber, &beta, device_diff_data, InputNumber));// 最后一个device_diff_data 改为device_diff_data
 	}
 }
 
@@ -138,7 +138,7 @@ inline void FullyConnectedLayer::deviceMalloc(int batchsize)
 	checkCudaErrors(cudaMalloc(&device_grad_w, sizeof(float) * ParamW.size()));				// GPU中给梯度w开辟空间
 	checkCudaErrors(cudaMalloc(&device_grad_b, sizeof(float) * ParamB.size()));				// GPU中给梯度b开辟空间
 																							// 反向传播数据
-	checkCudaErrors(cudaMalloc(&device_diff_data, sizeof(float) * batchsize * InputNumber));
+	checkCudaErrors(cudaMalloc(&device_diff_data, sizeof(float) * batchsize * OutputNumber));
 
 	// 拷贝初始化数据到GPU
 	checkCudaErrors(cudaMemcpyAsync(device_param_w, &ParamW[0], sizeof(float) * ParamW.size(), cudaMemcpyHostToDevice));
@@ -225,7 +225,7 @@ inline void ActivationLayer::deviceMalloc(int batchsize)
 	// 前向传播数据
 	checkCudaErrors(cudaMalloc(&device_data, sizeof(float) * batchsize * OutputNumber));
 	// 反向传播数据
-	checkCudaErrors(cudaMalloc(&device_diff_data, sizeof(float) * batchsize * InputNumber));
+	checkCudaErrors(cudaMalloc(&device_diff_data, sizeof(float) * batchsize * OutputNumber));
 }
 
 inline void ActivationLayer::deviceFree()
@@ -351,7 +351,8 @@ inline void ConvolutionLayer::deviceMalloc(int batchsize)
 	checkCudaErrors(cudaMalloc(&device_grad_w, sizeof(float) * ParamW.size()));
 	checkCudaErrors(cudaMalloc(&device_grad_b, sizeof(float) * ParamB.size()));
 	// 反向传播数据
-	checkCudaErrors(cudaMalloc(&device_diff_data, sizeof(float) * batchsize * OutputChannels * InputWidth * InputHeight));
+	//checkCudaErrors(cudaMalloc(&device_diff_data, sizeof(float) * batchsize * InputChannels * InputWidth * InputHeight));
+	checkCudaErrors(cudaMalloc(&device_diff_data, sizeof(float) * batchsize * OutputChannels * OutputHeight * OutputWidth));
 
 	// 拷贝初始化数据到GPU
 	checkCudaErrors(cudaMemcpyAsync(device_param_w, &ParamW[0], sizeof(float) * ParamW.size(), cudaMemcpyHostToDevice));
@@ -626,13 +627,15 @@ inline void OutputLayer::BackPropagate(bool isFirstLayer)
 	static float scalVal = 1.0f / static_cast<float>(BATCH_SIZE);
 	static float alpha = 1.0f, beta = 0.0f;
 	// Initialization (using the training error function)
-	checkCudaErrors(cudaMemcpyAsync(device_diff_data, device_data, sizeof(float) * BATCH_SIZE * LastLayer->OutputNumber, cudaMemcpyDeviceToDevice));
+	//checkCudaErrors(cudaMemcpyAsync(device_diff_data, device_data, sizeof(float) * BATCH_SIZE * LastLayer->OutputNumber, cudaMemcpyDeviceToDevice));
 
 	// Softmax layer
-	SoftmaxLossBackprop <<<RoundUp(BATCH_SIZE, BW), BW>>> (neuralNetwork->device_labels, LastLayer->OutputNumber, BATCH_SIZE, device_diff_data);
+	SoftmaxLossBackprop <<<RoundUp(BATCH_SIZE, BW), BW >>> (neuralNetwork->device_labels, device_data, device_diff_data, LastLayer->OutputNumber, BATCH_SIZE);
 
 	// Accounting for batch size in SGD
-	checkCudaErrors(cublasSscal(neuralNetwork->cublasHandle, LastLayer->OutputNumber * BATCH_SIZE, &scalVal, device_diff_data, 1));
+	//checkCudaErrors(cublasSscal(neuralNetwork->cublasHandle, LastLayer->OutputNumber * BATCH_SIZE, &scalVal, device_diff_data, 1));
+	checkCudaErrors(cudnnSoftmaxBackward(neuralNetwork->cudnnHandle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL,
+		&alpha, LastLayer->TensorDesc, device_data, LastLayer->TensorDesc, device_diff_data, &beta, LastLayer->TensorDesc, device_diff_data));// 最后一个device_diff_data 改为device_diff_data
 }
 
 inline void OutputLayer::deviceMalloc(int batchsize)
@@ -678,6 +681,11 @@ NeuralNetwork::NeuralNetwork()
 	checkCUDNN(cudnnCreate(&cudnnHandle));
 }
 
+NeuralNetwork::~NeuralNetwork()
+{
+	
+}
+
 void NeuralNetwork::AddData(DataSet *dataset)
 {
 	Data = dataset;
@@ -713,7 +721,8 @@ void NeuralNetwork::Destroy()
 	delete Data;
 	while (!Layers.empty())
 	{
-		Layers.clear();
+		delete Layers.back();
+		Layers.pop_back();
 	}
 	//delete Image;
 	//delete Conv1;
@@ -858,17 +867,6 @@ void NeuralNetwork::UpdateWeights(float learning_rate)
 	{
 		Layers[i]->UpdateWeights(learning_rate);
 	}
-	//// Conv1
-	//Conv1->UpdateWeights(learning_rate);
-
-	//// Conv2
-	//Conv2->UpdateWeights(learning_rate);
-
-	//// Fully connected 1
-	//FC1->UpdateWeights(learning_rate);
-
-	//// Fully connected 2
-	//FC2->UpdateWeights(learning_rate);
 
 }
 

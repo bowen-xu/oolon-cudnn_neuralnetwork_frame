@@ -24,7 +24,8 @@ void main()
 	nn.Create();
 	nn.Train(1000);
 	nn.Test();
-	
+	nn.Destroy();
+
 	getchar();
 
 }
