@@ -106,15 +106,15 @@ inline void FullyConnectedLayer::BackPropagate(bool isFirstLayer)
 	static float alpha = 1.0f, beta = 0.0f;
 	
 	checkCudaErrors(cublasSgemm(neuralNetwork->cublasHandle, CUBLAS_OP_N, CUBLAS_OP_T, InputNumber, OutputNumber, BATCH_SIZE,
-		&alpha, LastLayer->device_data, InputNumber, NextLayer->device_diff_data, OutputNumber, &beta, device_grad_w, InputNumber));
+		&alpha, LastLayer->device_data, InputNumber, device_diff_data, OutputNumber, &beta, device_grad_w, InputNumber));
 	
 	checkCudaErrors(cublasSgemv(neuralNetwork->cublasHandle, CUBLAS_OP_N, OutputNumber, BATCH_SIZE,
-		&alpha, NextLayer->device_diff_data, OutputNumber, neuralNetwork->device_ones, 1, &beta, device_grad_b, 1));
+		&alpha, device_diff_data, OutputNumber, neuralNetwork->device_ones, 1, &beta, device_grad_b, 1));
 	// Compute derivative with respect to data (for previous layer): pfc2*dfc2smax (500x10*10xN)
 	if (!isFirstLayer)
 	{
 		checkCudaErrors(cublasSgemm(neuralNetwork->cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N, InputNumber, BATCH_SIZE, OutputNumber,
-			&alpha, device_param_w, InputNumber, NextLayer->device_diff_data, OutputNumber, &beta, device_diff_data, InputNumber));// 最后一个device_diff_data 改为device_diff_data
+			&alpha, device_param_w, InputNumber, device_diff_data, OutputNumber, &beta, LastLayer->device_diff_data, InputNumber));// 最后一个device_diff_data 改为device_diff_data
 	}
 }
 
@@ -215,8 +215,8 @@ inline void ActivationLayer::BackPropagate(bool isFirstLayer)
 	if (!isFirstLayer)
 	{
 		checkCUDNN(cudnnActivationBackward(neuralNetwork->cudnnHandle, ActivationDesc, &alpha,
-			LastLayer->TensorDesc, device_data, LastLayer->TensorDesc, NextLayer->device_diff_data,
-			LastLayer->TensorDesc, LastLayer->device_data, &beta, LastLayer->TensorDesc, device_diff_data));
+			LastLayer->TensorDesc, device_data, LastLayer->TensorDesc, device_diff_data,
+			LastLayer->TensorDesc, LastLayer->device_data, &beta, LastLayer->TensorDesc, LastLayer->device_diff_data));
 	}
 }
 
@@ -313,20 +313,20 @@ inline void ConvolutionLayer::BackPropagate(bool isFistLayer)
 	static float alpha = 1.0f, beta = 0.0f;
 
 	checkCUDNN(cudnnConvolutionBackwardBias(neuralNetwork->cudnnHandle, &alpha, TensorDesc,
-		NextLayer->device_diff_data, &beta, BiasTensorDesc, device_grad_b));
+		device_diff_data, &beta, BiasTensorDesc, device_grad_b));
 
 
 	checkCUDNN(cudnnConvolutionBackwardFilter(neuralNetwork->cudnnHandle, &alpha, LastLayer->TensorDesc,
-		LastLayer->device_data, TensorDesc, NextLayer->device_diff_data, ConvDesc,
+		LastLayer->device_data, TensorDesc, device_diff_data, ConvDesc,
 		BwdAlgDesc, neuralNetwork->device_workspace, neuralNetwork->WorkspaceSize,
 		&beta, FilterDesc, device_grad_w));
 
 	if (!isFistLayer)
 	{
 		checkCUDNN(cudnnConvolutionBackwardData(neuralNetwork->cudnnHandle, &alpha, FilterDesc,
-			device_param_w, TensorDesc, NextLayer->device_diff_data, ConvDesc,
+			device_param_w, TensorDesc, device_diff_data, ConvDesc,
 			BwdDataAlgDesc, neuralNetwork->device_workspace, neuralNetwork->WorkspaceSize,
-			&beta, LastLayer->TensorDesc, device_diff_data));
+			&beta, LastLayer->TensorDesc, LastLayer->device_diff_data));
 	}	
 }
 
@@ -452,8 +452,8 @@ inline void MaxPoolLayer::BackPropagate(bool isFirstLayer)
 	if (!isFirstLayer)
 	{
 		checkCUDNN(cudnnPoolingBackward(neuralNetwork->cudnnHandle, PoolDesc, &alpha,
-			TensorDesc, device_data, TensorDesc, NextLayer->device_diff_data,
-			LastLayer->TensorDesc, LastLayer->device_data, &beta, LastLayer->TensorDesc, device_diff_data));
+			TensorDesc, device_data, TensorDesc, device_diff_data,
+			LastLayer->TensorDesc, LastLayer->device_data, &beta, LastLayer->TensorDesc, LastLayer->device_diff_data));
 	}
 	
 }
@@ -635,7 +635,7 @@ inline void OutputLayer::BackPropagate(bool isFirstLayer)
 	// Accounting for batch size in SGD
 	//checkCudaErrors(cublasSscal(neuralNetwork->cublasHandle, LastLayer->OutputNumber * BATCH_SIZE, &scalVal, device_diff_data, 1));
 	checkCudaErrors(cudnnSoftmaxBackward(neuralNetwork->cudnnHandle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL,
-		&alpha, LastLayer->TensorDesc, device_data, LastLayer->TensorDesc, device_diff_data, &beta, LastLayer->TensorDesc, device_diff_data));// 最后一个device_diff_data 改为device_diff_data
+		&alpha, LastLayer->TensorDesc, device_data, LastLayer->TensorDesc, device_diff_data, &beta, LastLayer->TensorDesc, LastLayer->device_diff_data));// 最后一个device_diff_data 改为device_diff_data
 }
 
 inline void OutputLayer::deviceMalloc(int batchsize)
