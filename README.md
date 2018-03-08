@@ -1,2 +1,2 @@
-# cudnn-neuralnetwork-frame
-This is a neural network frame, implemented through C++ and CUDA libraries, including cuDNN, cuBLAS, etc.
+# oolon: a cudnn-based neuralnetwork framework
+This is a neural network frame called "oolon", implemented through C++ and CUDA libraries, including cuDNN, cuBLAS, etc.
