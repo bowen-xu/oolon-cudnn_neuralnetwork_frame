@@ -35,14 +35,14 @@ void main()
 	//nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), 50, 3, 1));
 	//nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
 
-	//nn.AddLayer(new ResidualBlock(&nn, nn.Layers.back()));
-	//nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-	//nn.AddLayer(new ResidualBlock(&nn, nn.Layers.back()));
-	//nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-	//nn.AddLayer(new ResidualBlock(&nn, nn.Layers.back()));
-	//nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-	//nn.AddLayer(new ResidualBlock(&nn, nn.Layers.back()));
-	//nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
+	nn.AddLayer(new ResidualBlock(&nn, nn.Layers.back()));
+	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
+	nn.AddLayer(new ResidualBlock(&nn, nn.Layers.back()));
+	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
+	nn.AddLayer(new ResidualBlock(&nn, nn.Layers.back()));
+	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
+	nn.AddLayer(new ResidualBlock(&nn, nn.Layers.back()));
+	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
 
 	nn.AddLayer(new FullyConnectedLayer(&nn, nn.Layers.back(), 500));
 	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
@@ -51,7 +51,7 @@ void main()
 	
 
 	nn.Create();
-	nn.Train(1000);
+	nn.Train(5000);
 	nn.Test();
 	nn.Destroy();
 

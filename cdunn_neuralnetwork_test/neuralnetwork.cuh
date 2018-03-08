@@ -328,8 +328,11 @@ public:
 
 	inline void ForwardPropagate();
 	inline void BackPropagate();
+	inline void Predict();
 	inline void UpdateWeights(float learning_rate);
 private:
+	cudnnTensorDescriptor_t ParamBTensorDesc;
+
 	inline void deviceMalloc(int batchsize);
 	inline void deviceFree();
 	inline void CreateDescriptor(int batchsize);

@@ -1136,15 +1136,13 @@ BatchNormLayer::BatchNormLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer)
 	LastLayer = lastlayer;
 	LastLayer->NextLayer = this;
 
-	device_data = LastLayer->device_data;
-
 	OutputNumber = InputNumber = lastlayer->OutputNumber;
 	OutputChannels = InputChannels = lastlayer->InputChannels;
 	OutputWidth = InputWidth = lastlayer->OutputWidth;
 	OutputHeight = InputHeight = lastlayer->OutputHeight;
 	KernelSize = 0;
 	Padding = 0;
-	Stride = 1;
+	Stride = 1;	
 
 	deviceMalloc(BATCH_SIZE);
 	CreateDescriptor(BATCH_SIZE);
@@ -1158,12 +1156,22 @@ BatchNormLayer::~BatchNormLayer()
 
 inline void BatchNormLayer::ForwardPropagate()
 {
+	static float alpha = 1.0, beta = 0.0;
 	device_data = LastLayer->device_data;
+
+	//checkCudaErrors(cudnnBatchNormalizationForwardTraining(neuralNetwork->cudnnHandle, CUDNN_BATCHNORM_SPATIAL_PERSISTENT, 
+	//	&alpha, &beta, LastLayer->TensorDesc, LastLayer->device_data, TensorDesc, device_data,
+	//	));
 }
 
 inline void BatchNormLayer::BackPropagate()
 {
 	device_diff_data = NextLayer->device_diff_data;
+}
+
+inline void BatchNormLayer::Predict()
+{
+
 }
 
 inline void BatchNormLayer::UpdateWeights(float learning_rate)
@@ -1173,7 +1181,7 @@ inline void BatchNormLayer::UpdateWeights(float learning_rate)
 
 inline void BatchNormLayer::deviceMalloc(int batchsize)
 {
-
+	device_data = LastLayer->device_data;
 }
 
 inline void BatchNormLayer::deviceFree()
@@ -1183,10 +1191,11 @@ inline void BatchNormLayer::deviceFree()
 
 inline void BatchNormLayer::CreateDescriptor(int batchsize)
 {
-
+	checkCUDNN(cudnnSetTensor4dDescriptor(TensorDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batchsize, OutputChannels, OutputHeight, OutputWidth));
+	checkCUDNN(cudnnSetTensor4dDescriptor(ParamBTensorDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batchsize, OutputChannels, OutputHeight, OutputWidth));
 }
 
 inline void BatchNormLayer::DestroyDescriptor()
 {
-
+	checkCUDNN(cudnnDestroyTensorDescriptor(TensorDesc));
 }
