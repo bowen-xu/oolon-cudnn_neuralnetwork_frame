@@ -243,3 +243,27 @@ ModelManifest.xml
 
 # FAKE - F# Make
 .fake/
+/cdunn_neuralnetwork_test/Conv1.bias.bin
+/cdunn_neuralnetwork_test/Conv10.bias.bin
+/cdunn_neuralnetwork_test/FC2.bin
+/cdunn_neuralnetwork_test/FC2.bias.bin
+/cdunn_neuralnetwork_test/FC1.bin
+/cdunn_neuralnetwork_test/FC1.bias.bin
+/cdunn_neuralnetwork_test/Conv9.bin
+/cdunn_neuralnetwork_test/Conv9.bias.bin
+/cdunn_neuralnetwork_test/Conv8.bin
+/cdunn_neuralnetwork_test/Conv8.bias.bin
+/cdunn_neuralnetwork_test/Conv7.bin
+/cdunn_neuralnetwork_test/Conv7.bias.bin
+/cdunn_neuralnetwork_test/Conv6.bin
+/cdunn_neuralnetwork_test/Conv6.bias.bin
+/cdunn_neuralnetwork_test/Conv5.bin
+/cdunn_neuralnetwork_test/Conv5.bias.bin
+/cdunn_neuralnetwork_test/Conv4.bin
+/cdunn_neuralnetwork_test/Conv4.bias.bin
+/cdunn_neuralnetwork_test/Conv3.bin
+/cdunn_neuralnetwork_test/Conv3.bias.bin
+/cdunn_neuralnetwork_test/Conv2.bin
+/cdunn_neuralnetwork_test/Conv2.bias.bin
+/cdunn_neuralnetwork_test/Conv10.bin
+/cdunn_neuralnetwork_test/Conv1.bin
