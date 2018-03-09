@@ -8,6 +8,7 @@
 #include <cudnn.h>
 
 #include <stdio.h>
+#include <direct.h>
 #include <vector>
 #include <iostream>
 #include <sstream>
@@ -23,6 +24,8 @@
 #define LEARNING_RATE 0.01
 #define LR_GAMMA 0.0001
 #define LR_POWER 0.75
+
+#define SAVE_PATH "weights"
 
 using namespace std;
 
@@ -73,15 +76,15 @@ public:
 	friend class ActivationLayer;
 	friend class DataSet;
 	friend class OutputLayer;
-	friend class ResidualBlock;
-	friend class BranchLayer;
-	friend class BatchNormLayer;
+	//friend class ResidualBlock;
+	//friend class BranchLayer;
+	//friend class BatchNormLayer;
 
 	inline int getOutputNumber() { return OutputNumber; }
 	inline float *getData() { return device_data; }
 
-	bool FromFile(const char *fileprefix);
-	void ToFile(const char *fileprefix);
+	bool FromFile(const char *filefolder);
+	void ToFile(const char *filefolder);
 	virtual inline void ForwardPropagate() = 0;
 	virtual inline void BackPropagate() = 0;
 	virtual inline void Predict() { ForwardPropagate(); }
@@ -89,6 +92,9 @@ public:
 
 	bool isFirstLayer = false;
 	bool isSave = true;
+	bool isLoad = true;
+
+	string Name = "";
 protected:
 	int InputNumber;			// 输入层神经元个数
 	int OutputNumber;			// 输出层神经元个数
@@ -112,8 +118,8 @@ protected:
 	float *device_diff_data;
 
 	NeuralNetwork *neuralNetwork;
-	Layer *LastLayer = nullptr;
-	Layer *NextLayer = nullptr;
+	vector<Layer*> LastLayer;
+	vector<Layer*> NextLayer;
 	cudnnTensorDescriptor_t TensorDesc;	
 
 	
@@ -131,7 +137,7 @@ protected:
 class FullyConnectedLayer : public Layer
 {
 public:
-	FullyConnectedLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, int num);
+	FullyConnectedLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string name, int num);
 	~FullyConnectedLayer();
 
 	inline void ForwardPropagate();
@@ -153,7 +159,7 @@ class ActivationLayer : public Layer
 public:
 	friend class NeuralNetwork;
 
-	ActivationLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, cudnnActivationMode_t mode = CUDNN_ACTIVATION_RELU, cudnnNanPropagation_t nanopt = CUDNN_PROPAGATE_NAN, double coef = 0.0);
+	ActivationLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string name, cudnnActivationMode_t mode = CUDNN_ACTIVATION_RELU, cudnnNanPropagation_t nanopt = CUDNN_PROPAGATE_NAN, double coef = 0.0);
 	~ActivationLayer();
 
 	inline void ForwardPropagate();
@@ -178,7 +184,7 @@ private:
 class ConvolutionLayer : public Layer
 {
 public:
-	ConvolutionLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, int output_channels, int kernel_size, int padding = 0, int stride = 1);
+	ConvolutionLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string name, int output_channels, int kernel_size, int padding = 0, int stride = 1);
 	~ConvolutionLayer();
 
 	inline void ForwardPropagate();
@@ -206,7 +212,7 @@ private:
 class MaxPoolLayer : public Layer
 {
 public:
-	MaxPoolLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, int size, int stride);
+	MaxPoolLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string name, int size, int stride);
 	~MaxPoolLayer();
 
 	inline void ForwardPropagate();
@@ -266,7 +272,7 @@ private:
 class OutputLayer : public Layer
 {
 public:
-	OutputLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer);
+	OutputLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string name);
 	~OutputLayer();
 
 	inline void ForwardPropagate();
@@ -282,62 +288,62 @@ private:
 	inline void DestroyDescriptor();
 };
 
-class BranchLayer : public Layer
-{
-public:
-	BranchLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer);
-	~BranchLayer();
+//class BranchLayer : public Layer
+//{
+//public:
+//	BranchLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer);
+//	~BranchLayer();
+//
+//	ResidualBlock *ResBlock = nullptr;
+//
+//	inline void ForwardPropagate();
+//	inline void BackPropagate();
+//	inline void UpdateWeights(float learning_rate);
+//private:
+//	inline void deviceMalloc(int batchsize);
+//	inline void deviceFree();
+//	inline void CreateDescriptor(int batchsize);
+//	inline void DestroyDescriptor();
+//};
+//
+//// 要求输入和输出的宽度、高度和维度分别相同
+//class ResidualBlock : public Layer
+//{
+//public:
+//	ResidualBlock(NeuralNetwork *neuralnetwork, Layer *lastlayer);
+//	~ResidualBlock();
+//
+//	inline void ForwardPropagate();
+//	inline void BackPropagate();
+//	inline void UpdateWeights(float learning_rate);
+//private:
+//	float *device_branch_data;
+//
+//	inline void deviceMalloc(int batchsize);
+//	inline void deviceFree();
+//	inline void CreateDescriptor(int batchsize);
+//	inline void DestroyDescriptor();
+//};
 
-	ResidualBlock *ResBlock = nullptr;
 
-	inline void ForwardPropagate();
-	inline void BackPropagate();
-	inline void UpdateWeights(float learning_rate);
-private:
-	inline void deviceMalloc(int batchsize);
-	inline void deviceFree();
-	inline void CreateDescriptor(int batchsize);
-	inline void DestroyDescriptor();
-};
-
-// 要求输入和输出的宽度、高度和维度分别相同
-class ResidualBlock : public Layer
-{
-public:
-	ResidualBlock(NeuralNetwork *neuralnetwork, Layer *lastlayer);
-	~ResidualBlock();
-
-	inline void ForwardPropagate();
-	inline void BackPropagate();
-	inline void UpdateWeights(float learning_rate);
-private:
-	float *device_branch_data;
-
-	inline void deviceMalloc(int batchsize);
-	inline void deviceFree();
-	inline void CreateDescriptor(int batchsize);
-	inline void DestroyDescriptor();
-};
-
-
-class BatchNormLayer : Layer
-{
-public:
-	BatchNormLayer(NeuralNetwork *neuralnetwork, Layer *branchlayer);
-	~BatchNormLayer();
-
-	inline void ForwardPropagate();
-	inline void BackPropagate();
-	inline void Predict();
-	inline void UpdateWeights(float learning_rate);
-private:
-	cudnnTensorDescriptor_t ParamBTensorDesc;
-
-	inline void deviceMalloc(int batchsize);
-	inline void deviceFree();
-	inline void CreateDescriptor(int batchsize);
-	inline void DestroyDescriptor();
-};
+//class BatchNormLayer : Layer
+//{
+//public:
+//	BatchNormLayer(NeuralNetwork *neuralnetwork, Layer *branchlayer);
+//	~BatchNormLayer();
+//
+//	inline void ForwardPropagate();
+//	inline void BackPropagate();
+//	inline void Predict();
+//	inline void UpdateWeights(float learning_rate);
+//private:
+//	cudnnTensorDescriptor_t ParamBTensorDesc;
+//
+//	inline void deviceMalloc(int batchsize);
+//	inline void deviceFree();
+//	inline void CreateDescriptor(int batchsize);
+//	inline void DestroyDescriptor();
+//};
 
 
 class NeuralNetwork
@@ -350,9 +356,9 @@ public:
 	friend class ActivationLayer;
 	friend class DataSet;
 	friend class OutputLayer;
-	friend class ResidualBlock;
-	friend class BranchLayer;
-	friend class BatchNormLayer;
+	//friend class ResidualBlock;
+	//friend class BranchLayer;
+	//friend class BatchNormLayer;
 
 	NeuralNetwork();
 	~NeuralNetwork();
@@ -361,6 +367,8 @@ public:
 	void Train(int iterations);
 	void Test();
 	void Destroy();
+	void Save(const char *foldername = "defaultweights");
+	void Load(const char *foldername = "defaultweights");
 
 	void AddData(DataSet *dataset);
 	void AddLayer(Layer *layer, bool isfirstlayer = false);
@@ -377,10 +385,18 @@ private:
 	size_t WorkspaceSize = 0;
 	void *device_workspace = nullptr;
 
+	float prefixLearnrate = LEARNING_RATE;
+	int prefixIteration = 0;
+
 	void ForwardPropagate();
 	void BackPropagate();
 	void Predict();
 	void UpdateWeights(float learning_rate);
+
+	void saveLearningRate(const char *foldername = "defaultweights");
+	bool loadLearningRate(const char *foldername = "defaultweights");
+
+	const char *savePath = SAVE_PATH;
 };
 
 

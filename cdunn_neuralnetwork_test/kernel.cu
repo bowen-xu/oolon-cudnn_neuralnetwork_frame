@@ -10,48 +10,46 @@
 void main()
 {
 	NeuralNetwork nn;
-	//BranchLayer *branch;
+
 	nn.AddData(new DataSet());
-	nn.AddLayer(new ConvolutionLayer(&nn, nn.Data, 20, 5), true);
-	nn.AddLayer(new MaxPoolLayer(&nn, nn.Layers.back(), 2, 2));
-	nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), 50, 3));
-	nn.AddLayer(new MaxPoolLayer(&nn, nn.Layers.back(), 2, 2));
+	nn.AddLayer(new ConvolutionLayer(&nn, nn.Data, "Conv1", 20, 5), true);
+	nn.AddLayer(new MaxPoolLayer(&nn, nn.Layers.back(), "Pool1", 2, 2));
+	nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), "Conv2", 50, 3));
+	nn.AddLayer(new MaxPoolLayer(&nn, nn.Layers.back(), "Pool2", 2, 2));
 
+	nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), "Conv3", 50, 3, 1));
+	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back(), "Pool3"));
+	nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), "Conv4", 50, 3, 1));
+	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back(), "Pool4"));
+	nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), "Conv5", 50, 3, 1));
+	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back(), "Pool5"));
+	nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), "Conv6", 50, 3, 1));
+	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back(), "Pool6"));
+	nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), "Conv7", 50, 3, 1));
+	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back(), "Pool7"));
+	nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), "Conv8", 50, 3, 1));
+	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back(), "Pool8"));
+	nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), "Conv9", 50, 3, 1));
+	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back(), "Pool9"));
+	nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), "Conv10", 50, 3, 1));
+	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back(), "Pool10"));
+
+	Layer *layerbuf = nn.Layers.back();
+	//nn.AddLayer(new FullyConnectedLayer(&nn, nn.Layers.back(), "FC1", 500));
+	//nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back(), "ReLU1"));
+	//nn.AddLayer(new FullyConnectedLayer(&nn, nn.Layers.back(), "FC2", 10));
+	//nn.AddLayer(new OutputLayer(&nn, nn.Layers.back(), "Softmax1"));
+
+	nn.AddLayer(new FullyConnectedLayer(&nn, layerbuf, "FC3", 500));
+	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back(), "ReLU2"));
+	nn.AddLayer(new FullyConnectedLayer(&nn, nn.Layers.back(), "FC4", 10));
+	nn.AddLayer(new OutputLayer(&nn, nn.Layers.back(), "Softmax2"));
 	
-	//nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), 50, 3, 1));
-	//nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-	//nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), 50, 3, 1));
-	//nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-	//nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), 50, 3, 1));
-	//nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-	//nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), 50, 3, 1));
-	//nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-	//nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), 50, 3, 1));
-	//nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-	//nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), 50, 3, 1));
-	//nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-	//nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), 50, 3, 1));
-	//nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-	//nn.AddLayer(new ConvolutionLayer(&nn, nn.Layers.back(), 50, 3, 1));
-	//nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-
-	nn.AddLayer(new ResidualBlock(&nn, nn.Layers.back()));
-	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-	nn.AddLayer(new ResidualBlock(&nn, nn.Layers.back()));
-	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-	nn.AddLayer(new ResidualBlock(&nn, nn.Layers.back()));
-	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-	nn.AddLayer(new ResidualBlock(&nn, nn.Layers.back()));
-	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-
-	nn.AddLayer(new FullyConnectedLayer(&nn, nn.Layers.back(), 500));
-	nn.AddLayer(new ActivationLayer(&nn, nn.Layers.back()));
-	nn.AddLayer(new FullyConnectedLayer(&nn, nn.Layers.back(), 10));
-	nn.AddLayer(new OutputLayer(&nn, nn.Layers.back()));
 	
-
 	nn.Create();
-	nn.Train(5000);
+	nn.Load("iteration2000");
+	//nn.Train(1000);
+	//nn.Save("iteration2000");
 	nn.Test();
 	nn.Destroy();
 

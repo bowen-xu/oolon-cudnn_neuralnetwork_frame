@@ -48,7 +48,7 @@ __global__ void SoftmaxLossBackprop(const float *label, const float *data, float
 /*
 // FullyConnectedLayer
 */
-FullyConnectedLayer::FullyConnectedLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, int num)
+FullyConnectedLayer::FullyConnectedLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string name, int num)
 {
 	InputNumber = lastlayer->OutputNumber;
 	OutputNumber = num;
@@ -56,45 +56,25 @@ FullyConnectedLayer::FullyConnectedLayer(NeuralNetwork *neuralnetwork, Layer *la
 	Padding = 0;
 	Stride = 1;
 	KernelSize = 1;
+	Name = name;
 
 	ParamW.resize(InputNumber * OutputNumber);
 	ParamB.resize(OutputNumber);
 
 	neuralNetwork = neuralnetwork;
-	LastLayer = lastlayer;
-	lastlayer->NextLayer = this;
+	LastLayer.push_back(lastlayer);
+	lastlayer->NextLayer.push_back(this);
 
-	//random_device rd;
-	//mt19937 gen(rd());
-	//float wfc = sqrt(3.0f / (InputNumber * OutputNumber));
-	//std::uniform_real_distribution<> dfc(-wfc, wfc);
-	//for (auto&& iter : ParamW)
-	//	iter = static_cast<float>(dfc(gen));
-	//for (auto&& iter : ParamB)
-	//	iter = static_cast<float>(dfc(gen));
 
-	static int index = 0;
-	index++;
-	char str[256];
-	sprintf(str, "FC%d", index);
-
-	if (isSave)
-	{
-		random_device rd;
-		mt19937 gen(rd());
-		float wfc = sqrt(3.0f / (InputNumber * OutputNumber));
-		std::uniform_real_distribution<> dfc(-wfc, wfc);
-		for (auto&& iter : ParamW)
-			iter = static_cast<float>(dfc(gen));
-		for (auto&& iter : ParamB)
-			iter = static_cast<float>(dfc(gen));
-
-		ToFile(str);
-	}
-	else
-	{
-		FromFile(str);
-	}
+	random_device rd;
+	mt19937 gen(rd());
+	float wfc = sqrt(3.0f / (InputNumber * OutputNumber));
+	std::uniform_real_distribution<> dfc(-wfc, wfc);
+	for (auto&& iter : ParamW)
+		iter = static_cast<float>(dfc(gen));
+	for (auto&& iter : ParamB)
+		iter = static_cast<float>(dfc(gen));
+	
 
 	CreateDescriptor(BATCH_SIZE);
 	deviceMalloc(BATCH_SIZE);
@@ -110,30 +90,46 @@ FullyConnectedLayer::~FullyConnectedLayer()
 inline void FullyConnectedLayer::ForwardPropagate()
 {
 	static float alpha = 1.0f, beta = 0.0f;
-	// Forward propagate neurons using weights (fc1 = pfc1'*pool2)
-	checkCudaErrors(cublasSgemm(neuralNetwork->cublasHandle, CUBLAS_OP_T, CUBLAS_OP_N,
-		OutputNumber, BATCH_SIZE, InputNumber, &alpha, device_param_w, InputNumber,
-		LastLayer->device_data, InputNumber, &beta, device_data, OutputNumber));
-	// Add bias using GEMM's "beta" (fc1 += pfc1bias*1_vec')
-	checkCudaErrors(cublasSgemm(neuralNetwork->cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N,
-		OutputNumber, BATCH_SIZE, 1, &alpha, device_param_b, OutputNumber, neuralNetwork->device_ones, 1, &alpha,
-		device_data, OutputNumber));
+
+	for (auto&& lastlayer : LastLayer)
+	{
+		checkCudaErrors(cublasSgemm(neuralNetwork->cublasHandle, CUBLAS_OP_T, CUBLAS_OP_N,
+			OutputNumber, BATCH_SIZE, InputNumber, &alpha, device_param_w, InputNumber,
+			lastlayer->device_data, InputNumber, &beta, device_data, OutputNumber));
+
+		checkCudaErrors(cublasSgemm(neuralNetwork->cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N,
+			OutputNumber, BATCH_SIZE, 1, &alpha, device_param_b, OutputNumber, neuralNetwork->device_ones, 1, &alpha,
+			device_data, OutputNumber));
+	}
 }
 
 inline void FullyConnectedLayer::BackPropagate()
 {
 	static float alpha = 1.0f, beta = 0.0f;
 	
-	checkCudaErrors(cublasSgemm(neuralNetwork->cublasHandle, CUBLAS_OP_N, CUBLAS_OP_T, InputNumber, OutputNumber, BATCH_SIZE,
-		&alpha, LastLayer->device_data, InputNumber, NextLayer->device_diff_data, OutputNumber, &beta, device_grad_w, InputNumber));
-	
-	checkCudaErrors(cublasSgemv(neuralNetwork->cublasHandle, CUBLAS_OP_N, OutputNumber, BATCH_SIZE,
-		&alpha, NextLayer->device_diff_data, OutputNumber, neuralNetwork->device_ones, 1, &beta, device_grad_b, 1));
-	// Compute derivative with respect to data (for previous layer): pfc2*dfc2smax (500x10*10xN)
-	if (!isFirstLayer)
+	auto nextlayer = NextLayer.back();
+	for (auto&& nextlayerbuf : NextLayer)
 	{
-		checkCudaErrors(cublasSgemm(neuralNetwork->cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N, InputNumber, BATCH_SIZE, OutputNumber,
-			&alpha, device_param_w, InputNumber, NextLayer->device_diff_data, OutputNumber, &beta, device_diff_data, InputNumber));// 最后一个device_diff_data 改为device_diff_data
+		if (nextlayer != nextlayerbuf)
+		{
+			checkCudaErrors(cublasSaxpy_v2(neuralNetwork->cublasHandle, OutputNumber, &alpha,
+				nextlayerbuf->device_diff_data, 1, nextlayer->device_diff_data, 1));
+		}
+	}
+
+	for (auto&& lastlayer : LastLayer)
+	{
+		checkCudaErrors(cublasSgemm(neuralNetwork->cublasHandle, CUBLAS_OP_N, CUBLAS_OP_T, InputNumber, OutputNumber, BATCH_SIZE,
+			&alpha, lastlayer->device_data, InputNumber, nextlayer->device_diff_data, OutputNumber, &beta, device_grad_w, InputNumber));
+
+		checkCudaErrors(cublasSgemv(neuralNetwork->cublasHandle, CUBLAS_OP_N, OutputNumber, BATCH_SIZE,
+			&alpha, nextlayer->device_diff_data, OutputNumber, neuralNetwork->device_ones, 1, &beta, device_grad_b, 1));
+		
+		if (!isFirstLayer)
+		{
+			checkCudaErrors(cublasSgemm(neuralNetwork->cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N, InputNumber, BATCH_SIZE, OutputNumber,
+				&alpha, device_param_w, InputNumber, nextlayer->device_diff_data, OutputNumber, &beta, device_diff_data, InputNumber));
+		}
 	}
 }
 
@@ -194,7 +190,7 @@ inline void FullyConnectedLayer::DestroyDescriptor()
 /*
 // ActivationLayer
 */
-ActivationLayer::ActivationLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, cudnnActivationMode_t mode, cudnnNanPropagation_t nanopt, double coef)
+ActivationLayer::ActivationLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string name, cudnnActivationMode_t mode, cudnnNanPropagation_t nanopt, double coef)
 {
 	InputNumber = OutputNumber = lastlayer->OutputNumber;
 	InputHeight = OutputHeight = lastlayer->OutputHeight;
@@ -203,16 +199,18 @@ ActivationLayer::ActivationLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer,
 	Padding = 0;
 	KernelSize = 1;
 	Stride = 1;
+	Name = name;
 
 	ActivationMode = mode;
 	NanOption = nanopt;
 	Coef = coef;
 
 	neuralNetwork = neuralnetwork;
-	LastLayer = lastlayer;
-	lastlayer->NextLayer = this;
+	LastLayer.push_back(lastlayer);
+	lastlayer->NextLayer.push_back(this);
 
-	TensorDesc = LastLayer->TensorDesc;
+
+	TensorDesc = LastLayer.back()->TensorDesc;
 
 	CreateDescriptor(BATCH_SIZE);
 	deviceMalloc(BATCH_SIZE);
@@ -227,8 +225,11 @@ ActivationLayer::~ActivationLayer()
 inline void ActivationLayer::ForwardPropagate()
 {
 	static float alpha = 1.0f, beta = 0.0f;
-	checkCUDNN(cudnnActivationForward(neuralNetwork->cudnnHandle, ActivationDesc, &alpha,
-		LastLayer->TensorDesc, LastLayer->device_data, &beta, LastLayer->TensorDesc, device_data));
+	for (auto&& lastlayer : LastLayer)
+	{
+		checkCUDNN(cudnnActivationForward(neuralNetwork->cudnnHandle, ActivationDesc, &alpha,
+			lastlayer->TensorDesc, lastlayer->device_data, &beta, lastlayer->TensorDesc, device_data));
+	}	
 }
 
 inline void ActivationLayer::BackPropagate()
@@ -236,9 +237,21 @@ inline void ActivationLayer::BackPropagate()
 	static float alpha = 1.0f, beta = 0.0f;
 	if (!isFirstLayer)
 	{
-		checkCUDNN(cudnnActivationBackward(neuralNetwork->cudnnHandle, ActivationDesc, &alpha,
-			LastLayer->TensorDesc, device_data, LastLayer->TensorDesc, NextLayer->device_diff_data,
-			LastLayer->TensorDesc, LastLayer->device_data, &beta, LastLayer->TensorDesc, device_diff_data));
+		auto nextlayer = NextLayer.back();
+		for (auto&& nextlayerbuf : NextLayer)
+		{
+			if (nextlayer != nextlayerbuf)
+			{
+				checkCudaErrors(cublasSaxpy_v2(neuralNetwork->cublasHandle, OutputNumber, &alpha,
+					nextlayerbuf->device_diff_data, 1, nextlayer->device_diff_data, 1));
+			}
+		}
+		for (auto&& lastlayer : LastLayer)
+		{
+			checkCUDNN(cudnnActivationBackward(neuralNetwork->cudnnHandle, ActivationDesc, &alpha,
+				lastlayer->TensorDesc, device_data, lastlayer->TensorDesc, nextlayer->device_diff_data,
+				lastlayer->TensorDesc, lastlayer->device_data, &beta, lastlayer->TensorDesc, device_diff_data));
+		}
 	}
 }
 
@@ -275,7 +288,7 @@ inline void ActivationLayer::DestroyDescriptor()
 /*
 // ConvolutionLayer
 */
-ConvolutionLayer::ConvolutionLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, int output_channels, int kernel_size, int padding, int stride)
+ConvolutionLayer::ConvolutionLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string name, int output_channels, int kernel_size, int padding, int stride)
 {
 	InputWidth = lastlayer->OutputWidth;
 	InputHeight = lastlayer->OutputHeight;
@@ -288,37 +301,23 @@ ConvolutionLayer::ConvolutionLayer(NeuralNetwork *neuralnetwork, Layer *lastlaye
 	KernelSize = kernel_size;
 	Padding = padding;
 	Stride = stride;
+	Name = name;
 	
 	ParamW.resize(InputChannels * KernelSize * KernelSize * OutputChannels);
 	ParamB.resize(OutputChannels);
 
 	neuralNetwork = neuralnetwork;
-	LastLayer = lastlayer;
-	lastlayer->NextLayer = this;
-
-	static int index = 0;
-	index++;
-	char str[256];
-	sprintf(str, "Conv%d", index);
-
-	if (isSave)
-	{
-		random_device rd;
-		mt19937 gen(rd());
-		float wconv = sqrt(3.0f / (KernelSize * KernelSize * InputChannels));
-		std::uniform_real_distribution<> dconv(-wconv, wconv);
-		for (auto&& iter : ParamW)
-			iter = static_cast<float>(dconv(gen));
-		for (auto&& iter : ParamB)
-			iter = static_cast<float>(dconv(gen));
-
-		ToFile(str);
-	}
-	else
-	{
-
-		FromFile(str);
-	}
+	LastLayer.push_back(lastlayer);
+	lastlayer->NextLayer.push_back(this);
+	
+	random_device rd;
+	mt19937 gen(rd());
+	float wconv = sqrt(3.0f / (KernelSize * KernelSize * InputChannels));
+	std::uniform_real_distribution<> dconv(-wconv, wconv);
+	for (auto&& iter : ParamW)
+		iter = static_cast<float>(dconv(gen));
+	for (auto&& iter : ParamB)
+		iter = static_cast<float>(dconv(gen));
 
 	CreateDescriptor(BATCH_SIZE);
 	deviceMalloc(BATCH_SIZE);
@@ -335,36 +334,55 @@ ConvolutionLayer::~ConvolutionLayer()
 inline void ConvolutionLayer::ForwardPropagate()
 {
 	static float alpha = 1.0f, beta = 0.0f;
-	checkCUDNN(cudnnConvolutionForward(
-		neuralNetwork->cudnnHandle, &alpha, LastLayer->TensorDesc,
-		LastLayer->device_data, FilterDesc, device_param_w, ConvDesc,
-		FwdAlgDesc, neuralNetwork->device_workspace, neuralNetwork->WorkspaceSize, &beta,
-		TensorDesc, device_data));
 
-	checkCUDNN(cudnnAddTensor(neuralNetwork->cudnnHandle, &alpha, BiasTensorDesc,
-		device_param_b, &alpha, TensorDesc, device_data));
+	for (auto&& lastlayer : LastLayer)
+	{
+		checkCUDNN(cudnnConvolutionForward(
+			neuralNetwork->cudnnHandle, &alpha, lastlayer->TensorDesc,
+			lastlayer->device_data, FilterDesc, device_param_w, ConvDesc,
+			FwdAlgDesc, neuralNetwork->device_workspace, neuralNetwork->WorkspaceSize, &beta,
+			TensorDesc, device_data));
+
+		checkCUDNN(cudnnAddTensor(neuralNetwork->cudnnHandle, &alpha, BiasTensorDesc,
+			device_param_b, &alpha, TensorDesc, device_data));
+	}
+	
 }
 
 inline void ConvolutionLayer::BackPropagate()
 {
 	static float alpha = 1.0f, beta = 0.0f;
 
-	checkCUDNN(cudnnConvolutionBackwardBias(neuralNetwork->cudnnHandle, &alpha, TensorDesc,
-		NextLayer->device_diff_data, &beta, BiasTensorDesc, device_grad_b));
-
-
-	checkCUDNN(cudnnConvolutionBackwardFilter(neuralNetwork->cudnnHandle, &alpha, LastLayer->TensorDesc,
-		LastLayer->device_data, TensorDesc, NextLayer->device_diff_data, ConvDesc,
-		BwdAlgDesc, neuralNetwork->device_workspace, neuralNetwork->WorkspaceSize,
-		&beta, FilterDesc, device_grad_w));
-
-	if (!isFirstLayer)
+	auto nextlayer = NextLayer.back();
+	for (auto&& nextlayerbuf : NextLayer)
 	{
-		checkCUDNN(cudnnConvolutionBackwardData(neuralNetwork->cudnnHandle, &alpha, FilterDesc,
-			device_param_w, TensorDesc, NextLayer->device_diff_data, ConvDesc,
-			BwdDataAlgDesc, neuralNetwork->device_workspace, neuralNetwork->WorkspaceSize,
-			&beta, LastLayer->TensorDesc, device_diff_data));
-	}	
+		if (nextlayer != nextlayerbuf)
+		{
+			checkCudaErrors(cublasSaxpy_v2(neuralNetwork->cublasHandle, OutputNumber, &alpha,
+				nextlayerbuf->device_diff_data, 1, nextlayer->device_diff_data, 1));
+		}
+	}
+
+	for (auto&& lastlayer : LastLayer)
+	{
+		checkCUDNN(cudnnConvolutionBackwardBias(neuralNetwork->cudnnHandle, &alpha, TensorDesc,
+			nextlayer->device_diff_data, &beta, BiasTensorDesc, device_grad_b));
+
+
+		checkCUDNN(cudnnConvolutionBackwardFilter(neuralNetwork->cudnnHandle, &alpha, lastlayer->TensorDesc,
+			lastlayer->device_data, TensorDesc, nextlayer->device_diff_data, ConvDesc,
+			BwdAlgDesc, neuralNetwork->device_workspace, neuralNetwork->WorkspaceSize,
+			&beta, FilterDesc, device_grad_w));
+
+		if (!isFirstLayer)
+		{
+			checkCUDNN(cudnnConvolutionBackwardData(neuralNetwork->cudnnHandle, &alpha, FilterDesc,
+				device_param_w, TensorDesc, nextlayer->device_diff_data, ConvDesc,
+				BwdDataAlgDesc, neuralNetwork->device_workspace, neuralNetwork->WorkspaceSize,
+				&beta, lastlayer->TensorDesc, device_diff_data));
+		}
+	}
+	
 }
 
 inline void ConvolutionLayer::UpdateWeights(float learning_rate)
@@ -424,18 +442,22 @@ inline void ConvolutionLayer::CreateDescriptor(int batchsize)
 	checkCUDNN(cudnnSetConvolution2dDescriptor(ConvDesc, Padding, Padding, Stride, Stride, 1, 1, CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT));
 	checkCUDNN(cudnnSetTensor4dDescriptor(TensorDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batchsize, OutputChannels, OutputHeight, OutputWidth));
 
-	// 前向传播算法设置
-	checkCUDNN(cudnnGetConvolutionForwardAlgorithm(neuralNetwork->cudnnHandle, LastLayer->TensorDesc, FilterDesc, ConvDesc, TensorDesc, CUDNN_CONVOLUTION_FWD_PREFER_FASTEST, 0, &FwdAlgDesc));
-	checkCUDNN(cudnnGetConvolutionForwardWorkspaceSize(neuralNetwork->cudnnHandle, LastLayer->TensorDesc, FilterDesc, ConvDesc, TensorDesc, FwdAlgDesc, &tempsize));
-	neuralNetwork->WorkspaceSize = max(neuralNetwork->WorkspaceSize, tempsize);
+	for (auto&& lastlayer : LastLayer)
+	{
+		// 前向传播算法设置
+		checkCUDNN(cudnnGetConvolutionForwardAlgorithm(neuralNetwork->cudnnHandle, lastlayer->TensorDesc, FilterDesc, ConvDesc, TensorDesc, CUDNN_CONVOLUTION_FWD_PREFER_FASTEST, 0, &FwdAlgDesc));
+		checkCUDNN(cudnnGetConvolutionForwardWorkspaceSize(neuralNetwork->cudnnHandle, lastlayer->TensorDesc, FilterDesc, ConvDesc, TensorDesc, FwdAlgDesc, &tempsize));
+		neuralNetwork->WorkspaceSize = max(neuralNetwork->WorkspaceSize, tempsize);
 
-	// 反向传播算法设置
-	checkCUDNN(cudnnGetConvolutionBackwardFilterAlgorithm(neuralNetwork->cudnnHandle, LastLayer->TensorDesc, TensorDesc, ConvDesc, FilterDesc, CUDNN_CONVOLUTION_BWD_FILTER_PREFER_FASTEST, 0, &BwdAlgDesc));
-	checkCUDNN(cudnnGetConvolutionBackwardFilterWorkspaceSize(neuralNetwork->cudnnHandle, LastLayer->TensorDesc, TensorDesc, ConvDesc, FilterDesc, BwdAlgDesc, &tempsize));
-	neuralNetwork->WorkspaceSize = max(neuralNetwork->WorkspaceSize, tempsize);
-	checkCUDNN(cudnnGetConvolutionBackwardDataAlgorithm(neuralNetwork->cudnnHandle, FilterDesc, TensorDesc, ConvDesc, LastLayer->TensorDesc, CUDNN_CONVOLUTION_BWD_DATA_PREFER_FASTEST, 0, &BwdDataAlgDesc));
-	checkCUDNN(cudnnGetConvolutionBackwardDataWorkspaceSize(neuralNetwork->cudnnHandle, FilterDesc, TensorDesc, ConvDesc, LastLayer->TensorDesc, BwdDataAlgDesc, &tempsize));
-	neuralNetwork->WorkspaceSize = max(neuralNetwork->WorkspaceSize, tempsize);
+		// 反向传播算法设置
+		checkCUDNN(cudnnGetConvolutionBackwardFilterAlgorithm(neuralNetwork->cudnnHandle, lastlayer->TensorDesc, TensorDesc, ConvDesc, FilterDesc, CUDNN_CONVOLUTION_BWD_FILTER_PREFER_FASTEST, 0, &BwdAlgDesc));
+		checkCUDNN(cudnnGetConvolutionBackwardFilterWorkspaceSize(neuralNetwork->cudnnHandle, lastlayer->TensorDesc, TensorDesc, ConvDesc, FilterDesc, BwdAlgDesc, &tempsize));
+		neuralNetwork->WorkspaceSize = max(neuralNetwork->WorkspaceSize, tempsize);
+		checkCUDNN(cudnnGetConvolutionBackwardDataAlgorithm(neuralNetwork->cudnnHandle, FilterDesc, TensorDesc, ConvDesc, lastlayer->TensorDesc, CUDNN_CONVOLUTION_BWD_DATA_PREFER_FASTEST, 0, &BwdDataAlgDesc));
+		checkCUDNN(cudnnGetConvolutionBackwardDataWorkspaceSize(neuralNetwork->cudnnHandle, FilterDesc, TensorDesc, ConvDesc, lastlayer->TensorDesc, BwdDataAlgDesc, &tempsize));
+		neuralNetwork->WorkspaceSize = max(neuralNetwork->WorkspaceSize, tempsize);
+	}
+	
 }
 
 inline void ConvolutionLayer::DestroyDescriptor()
@@ -449,7 +471,7 @@ inline void ConvolutionLayer::DestroyDescriptor()
 /*
 // MaxPoolLayer
 */
-MaxPoolLayer::MaxPoolLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, int size, int stride)
+MaxPoolLayer::MaxPoolLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string name, int size, int stride)
 {
 	InputChannels = OutputChannels = lastlayer->OutputChannels;
 	InputWidth = lastlayer->OutputWidth;
@@ -461,10 +483,11 @@ MaxPoolLayer::MaxPoolLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, int s
 	KernelSize = size;
 	Stride = stride;
 	Padding = 0;
+	Name = name;
 
 	neuralNetwork = neuralnetwork;
-	LastLayer = lastlayer;
-	lastlayer->NextLayer = this;
+	LastLayer.push_back(lastlayer);
+	lastlayer->NextLayer.push_back(this);
 
 	CreateDescriptor(BATCH_SIZE);
 	deviceMalloc(BATCH_SIZE);
@@ -479,19 +502,39 @@ MaxPoolLayer::~MaxPoolLayer()
 inline void MaxPoolLayer::ForwardPropagate()
 {
 	static float alpha = 1.0f, beta = 0.0f;
-	checkCUDNN(cudnnPoolingForward(neuralNetwork->cudnnHandle, PoolDesc, &alpha, LastLayer->TensorDesc,
-		LastLayer->device_data, &beta, TensorDesc, device_data));
+
+	for (auto&& lastlayer : LastLayer)
+	{
+		checkCUDNN(cudnnPoolingForward(neuralNetwork->cudnnHandle, PoolDesc, &alpha, lastlayer->TensorDesc,
+			lastlayer->device_data, &beta, TensorDesc, device_data));
+	}
+	
 }
 
 inline void MaxPoolLayer::BackPropagate()
 {
 	static float alpha = 1.0f, beta = 0.0f;
-	if (!isFirstLayer)
+
+	auto nextlayer = NextLayer.back();
+	for (auto&& nextlayerbuf : NextLayer)
 	{
-		checkCUDNN(cudnnPoolingBackward(neuralNetwork->cudnnHandle, PoolDesc, &alpha,
-			TensorDesc, device_data, TensorDesc, NextLayer->device_diff_data,
-			LastLayer->TensorDesc, LastLayer->device_data, &beta, LastLayer->TensorDesc, device_diff_data));
+		if (nextlayer != nextlayerbuf)
+		{
+			checkCudaErrors(cublasSaxpy_v2(neuralNetwork->cublasHandle, OutputNumber, &alpha,
+				nextlayerbuf->device_diff_data, 1, nextlayer->device_diff_data, 1));
+		}
 	}
+
+	for (auto&& lastlayer : LastLayer)
+	{
+		if (!isFirstLayer)
+		{
+			checkCUDNN(cudnnPoolingBackward(neuralNetwork->cudnnHandle, PoolDesc, &alpha,
+				TensorDesc, device_data, TensorDesc, nextlayer->device_diff_data,
+				lastlayer->TensorDesc, lastlayer->device_data, &beta, lastlayer->TensorDesc, device_diff_data));
+		}
+	}
+	
 	
 }
 
@@ -628,7 +671,7 @@ inline void DataSet::DestroyDescriptor()
 /*
 // OutputLayer
 */
-OutputLayer::OutputLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer)
+OutputLayer::OutputLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string name)
 {
 	OutputNumber = InputNumber = lastlayer->OutputNumber;
 	OutputHeight = InputHeight = lastlayer->OutputHeight;
@@ -637,10 +680,11 @@ OutputLayer::OutputLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer)
 	Padding = 0;
 	KernelSize = 1;
 	Stride = 1;
-
+	Name = name;
+	
 	neuralNetwork = neuralnetwork;
-	LastLayer = lastlayer;
-	lastlayer->NextLayer = this;
+	LastLayer.push_back(lastlayer);
+	lastlayer->NextLayer.push_back(this);
 
 	CreateDescriptor(BATCH_SIZE);
 	deviceMalloc(BATCH_SIZE);
@@ -655,24 +699,28 @@ OutputLayer::~OutputLayer()
 inline void OutputLayer::ForwardPropagate()
 {
 	static float alpha = 1.0f, beta = 0.0f;
-	checkCUDNN(cudnnSoftmaxForward(neuralNetwork->cudnnHandle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL,
-		&alpha, LastLayer->TensorDesc, LastLayer->device_data, &beta, LastLayer->TensorDesc, device_data));
+
+	for (auto&& lastlayer : LastLayer)
+	{
+		checkCUDNN(cudnnSoftmaxForward(neuralNetwork->cudnnHandle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL,
+			&alpha, lastlayer->TensorDesc, lastlayer->device_data, &beta, lastlayer->TensorDesc, device_data));
+	}
+	
 }
 
 inline void OutputLayer::BackPropagate()
 {
 	static float scalVal = 1.0f / static_cast<float>(BATCH_SIZE);
 	static float alpha = 1.0f, beta = 0.0f;
-	// Initialization (using the training error function)
-	//checkCudaErrors(cudaMemcpyAsync(device_diff_data, device_data, sizeof(float) * BATCH_SIZE * LastLayer->OutputNumber, cudaMemcpyDeviceToDevice));
 
-	// Softmax layer
-	SoftmaxLossBackprop <<<RoundUp(BATCH_SIZE, BW), BW >>> (neuralNetwork->device_labels, device_data, device_diff_data, LastLayer->OutputNumber, BATCH_SIZE);
+	for (auto&& lastlayer : LastLayer)
+	{
+		SoftmaxLossBackprop << <RoundUp(BATCH_SIZE, BW), BW >> > (neuralNetwork->device_labels, device_data, device_diff_data, lastlayer->OutputNumber, BATCH_SIZE);
 
-	// Accounting for batch size in SGD
-	//checkCudaErrors(cublasSscal(neuralNetwork->cublasHandle, LastLayer->OutputNumber * BATCH_SIZE, &scalVal, device_diff_data, 1));
-	checkCudaErrors(cudnnSoftmaxBackward(neuralNetwork->cudnnHandle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL,
-		&alpha, LastLayer->TensorDesc, device_data, LastLayer->TensorDesc, device_diff_data, &beta, LastLayer->TensorDesc, device_diff_data));// 最后一个device_diff_data 改为device_diff_data
+		checkCudaErrors(cudnnSoftmaxBackward(neuralNetwork->cudnnHandle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL,
+			&alpha, lastlayer->TensorDesc, device_data, lastlayer->TensorDesc, device_diff_data, &beta, lastlayer->TensorDesc, device_diff_data));
+	}
+	
 }
 
 inline void OutputLayer::deviceMalloc(int batchsize)
@@ -790,10 +838,10 @@ void NeuralNetwork::Train(int iterations)
 
 	size_t train_size = Data->getTrainSize();
 	float *device_data = Data->getData();
-
+	float learningRate;
 	for (int iter = 0; iter < iterations; ++iter)
 	{
-		int imageid = iter % (train_size / BATCH_SIZE);
+		int imageid = prefixIteration % (train_size / BATCH_SIZE);
 		checkCudaErrors(cudaMemcpyAsync(device_data, &((Data->TrainSet_float)[imageid * BATCH_SIZE * Data->getOutputNumber()]),
 			sizeof(float) * BATCH_SIZE * Data->getOutputNumber(), cudaMemcpyHostToDevice));
 		checkCudaErrors(cudaMemcpyAsync(device_labels, &((Data->TrainLabels_float)[imageid * BATCH_SIZE]),
@@ -806,14 +854,16 @@ void NeuralNetwork::Train(int iterations)
 		// Backward propagation
 		BackPropagate();
 
+
 		// Compute learning rate
-		float learningRate = static_cast<float>(LEARNING_RATE * pow((1.0 + LR_GAMMA * iter), (-LR_POWER)));
+		learningRate = static_cast<float>(LEARNING_RATE * pow((1.0 + LR_GAMMA * (++prefixIteration)), (-LR_POWER)));
 		
 		// Update weights
 		UpdateWeights(learningRate);
 	}
 	checkCudaErrors(cudaDeviceSynchronize());
 	auto t2 = std::chrono::high_resolution_clock::now();
+	prefixLearnrate = learningRate;
 
 	printf("Iteration time: %f ms\n", std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000.0f / iterations);
 
@@ -825,6 +875,7 @@ void NeuralNetwork::Test()
 	float classification_error = 1.0f;
 
 	int classifications = (int)(Data->getTestSize() / 10);
+	//int classifications = (int)(Data->getTestSize());
 
 	// Test the resulting neural network's classification
 
@@ -838,6 +889,7 @@ void NeuralNetwork::Test()
 		checkCudaErrors(cudaMalloc(&device_workspace, test_nn.WorkspaceSize));
 	}
 
+	printf("Testing...\n");
 	int num_errors = 0;
 	for (int i = 0; i < classifications; ++i)
 	{
@@ -922,280 +974,379 @@ void NeuralNetwork::UpdateWeights(float learning_rate)
 
 }
 
-ResidualBlock::ResidualBlock(NeuralNetwork *neuralnetwork, Layer *lastlayer)
+void NeuralNetwork::Save(const char *foldername)
 {
-	neuralNetwork = neuralnetwork;
+	int count = Layers.size();
+	char path[256];
+	sprintf(path, "%s/%s/", savePath, foldername);
+	mkdir(path);
 
-	
-	BranchLayer *branchlayer = new BranchLayer(neuralNetwork, lastlayer);
-	device_branch_data = branchlayer->device_data;
-	branchlayer->ResBlock = this;
-	neuralNetwork->AddLayer(branchlayer);
+	// save learning rate
+	saveLearningRate(foldername);
 
-	neuralNetwork->AddLayer(new ConvolutionLayer(neuralNetwork, branchlayer, 50, 3, 1));
-	neuralNetwork->AddLayer(new ActivationLayer(neuralNetwork, neuralNetwork->Layers.back()));
-	neuralNetwork->AddLayer(new ConvolutionLayer(neuralNetwork, neuralNetwork->Layers.back(), 50, 3, 1));
-
-	LastLayer = neuralNetwork->Layers.back();
-	LastLayer->NextLayer = this;
-
-
-	OutputNumber = InputNumber = LastLayer->OutputNumber;
-	OutputChannels = InputChannels = LastLayer->InputChannels;
-	OutputWidth = InputWidth = LastLayer->OutputWidth;
-	OutputHeight = InputHeight = LastLayer->OutputHeight;
-	KernelSize = 0;
-	Padding = 0;
-	Stride = 1;
-
-	deviceMalloc(BATCH_SIZE);
-	CreateDescriptor(BATCH_SIZE);
-}
-
-ResidualBlock::~ResidualBlock()
-{
-	deviceFree();
-	DestroyDescriptor();
-}
-
-inline void ResidualBlock::ForwardPropagate() 
-{
-	static float alpha = 1.0;
-
-	checkCudaErrors(cublasScopy(neuralNetwork->cublasHandle, InputNumber * BATCH_SIZE, 
-		LastLayer->device_data, 1, device_data, 1));
-	checkCudaErrors(cublasSaxpy(neuralNetwork->cublasHandle, InputNumber * BATCH_SIZE,
-		&alpha, device_branch_data, 1, device_data, 1));
-
-}
-inline void ResidualBlock::BackPropagate() 
-{
-	device_diff_data = NextLayer->device_diff_data;
-
-}
-inline void ResidualBlock::UpdateWeights(float learning_rate) 
-{
-	
-}
-
-inline void ResidualBlock::deviceMalloc(int batchsize)
-{
-	checkCudaErrors(cudaMalloc(&device_data, sizeof(float) * batchsize * OutputNumber));
-}
-
-inline void ResidualBlock::deviceFree()
-{
-	checkCudaErrors(cudaFree(device_data));
-}
-
-inline void ResidualBlock::CreateDescriptor(int batchsize)
-{
-	TensorDesc = LastLayer->TensorDesc;
-}
-
-inline void ResidualBlock::DestroyDescriptor()
-{
-
-}
-
-
-
-
-
-BranchLayer::BranchLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer)
-{
-	neuralNetwork = neuralnetwork;
-	LastLayer = lastlayer;
-	LastLayer->NextLayer = this;
-
-	device_data = LastLayer->device_data;
-
-	OutputNumber = InputNumber = lastlayer->OutputNumber;
-	OutputChannels = InputChannels = lastlayer->InputChannels;
-	OutputWidth = InputWidth = lastlayer->OutputWidth;
-	OutputHeight = InputHeight = lastlayer->OutputHeight;
-	KernelSize = 0;
-	Padding = 0;
-	Stride = 1;
-
-	deviceMalloc(BATCH_SIZE);
-	CreateDescriptor(BATCH_SIZE);
-}
-
-BranchLayer::~BranchLayer()
-{
-	deviceFree();
-	DestroyDescriptor();
-}
-
-inline void BranchLayer::ForwardPropagate()
-{
-	device_data = LastLayer->device_data;
-}
-inline void BranchLayer::BackPropagate()
-{
-	static float alpha = 1.0;
-	checkCudaErrors(cublasScopy(neuralNetwork->cublasHandle, InputNumber,
-		NextLayer->device_diff_data, 1, device_diff_data, 1));
-	if (ResBlock != nullptr)
+	// save weights
+	for (int i = 0; i < count; i++)
 	{
-		checkCudaErrors(cublasSaxpy(neuralNetwork->cublasHandle, InputNumber,
-			&alpha, ResBlock->device_diff_data, 1, device_diff_data, 1));
+		Layers[i]->ToFile(path);
 	}
-}
-inline void BranchLayer::UpdateWeights(float learning_rate)
-{
-
+	printf("Weights saved.\n");
 }
 
-inline void BranchLayer::deviceMalloc(int batchsize)
+void NeuralNetwork::Load(const char *foldername)
 {
-	//device_data = LastLayer->device_data;
-	checkCudaErrors(cudaMalloc(&device_diff_data, sizeof(float) * batchsize * InputNumber));
+	int count = Layers.size();
+	char path[256];
+	sprintf(path, "%s/%s/", savePath, foldername);
+	mkdir(path);
+
+	// load learning rate
+	loadLearningRate(foldername);
+
+	// load weights
+	for (int i = 0; i < count; i++)
+	{
+		Layers[i]->FromFile(path);
+	}
+	printf("Weights loaded.\n");
 }
 
-inline void BranchLayer::deviceFree()
+void NeuralNetwork::saveLearningRate(const char *foldername)
 {
-	checkCudaErrors(cudaFree(device_diff_data));
+	
+	char path[256];
+	sprintf(path, "%s/%s/", savePath, foldername);
+	mkdir(path);
+	stringstream ssf;
+	ssf << path << "learnrate" << ".oolon";
+
+	FILE *fp;
+	// save learning rates
+	fp = fopen(ssf.str().c_str(), "wb");
+	if (!fp)
+	{
+		printf("ERROR: Cannot open file %s\n", ssf.str().c_str());
+		exit(2);
+	}
+	fwrite(&prefixLearnrate, sizeof(float), 1, fp);
+	fwrite(&prefixIteration, sizeof(int), 1, fp);
+
+	fclose(fp);
 }
 
-inline void BranchLayer::CreateDescriptor(int batchsize)
+bool NeuralNetwork::loadLearningRate(const char *foldername)
 {
-	TensorDesc = LastLayer->TensorDesc;
-}
+	char path[256];
+	sprintf(path, "%s/%s/", savePath, foldername);
+	mkdir(path);
+	stringstream ssf;
+	ssf << path << "learnrate" << ".oolon";
 
-inline void BranchLayer::DestroyDescriptor()
-{
-
-}
-
-
-
-bool Layer::FromFile(const char *fileprefix)
-{
-	std::stringstream ssf, ssbf;
-	ssf << fileprefix << ".bin";
-	ssbf << fileprefix << ".bias.bin";
-
-	// Read weights file
-	FILE *fp = fopen(ssf.str().c_str(), "rb");
+	FILE *fp;
+	// save learning rates
+	fp = fopen(ssf.str().c_str(), "rb");
 	if (!fp)
 	{
 		printf("ERROR: Cannot open file %s\n", ssf.str().c_str());
 		return false;
 	}
-	fread(&ParamW[0], sizeof(float), ParamW.size(), fp);
-	fclose(fp);
+	fread(&prefixLearnrate, sizeof(float), 1, fp);
+	fread(&prefixIteration, sizeof(int), 1, fp);
 
-	// Read bias file
-	fp = fopen(ssbf.str().c_str(), "rb");
-	if (!fp)
-	{
-		printf("ERROR: Cannot open file %s\n", ssbf.str().c_str());
-		return false;
-	}
-	fread(&ParamB[0], sizeof(float), ParamB.size(), fp);
 	fclose(fp);
 	return true;
 }
 
-void Layer::ToFile(const char *fileprefix)
+//ResidualBlock::ResidualBlock(NeuralNetwork *neuralnetwork, Layer *lastlayer)
+//{
+//	neuralNetwork = neuralnetwork;
+//
+//	
+//	BranchLayer *branchlayer = new BranchLayer(neuralNetwork, lastlayer);
+//	device_branch_data = branchlayer->device_data;
+//	branchlayer->ResBlock = this;
+//	neuralNetwork->AddLayer(branchlayer);
+//
+//	neuralNetwork->AddLayer(new ConvolutionLayer(neuralNetwork, branchlayer, 50, 3, 1));
+//	neuralNetwork->AddLayer(new ActivationLayer(neuralNetwork, neuralNetwork->Layers.back()));
+//	neuralNetwork->AddLayer(new ConvolutionLayer(neuralNetwork, neuralNetwork->Layers.back(), 50, 3, 1));
+//
+//	LastLayer = neuralNetwork->Layers.back();
+//	LastLayer->NextLayer = this;
+//
+//
+//	OutputNumber = InputNumber = LastLayer->OutputNumber;
+//	OutputChannels = InputChannels = LastLayer->InputChannels;
+//	OutputWidth = InputWidth = LastLayer->OutputWidth;
+//	OutputHeight = InputHeight = LastLayer->OutputHeight;
+//	KernelSize = 0;
+//	Padding = 0;
+//	Stride = 1;
+//
+//	deviceMalloc(BATCH_SIZE);
+//	CreateDescriptor(BATCH_SIZE);
+//}
+//
+//ResidualBlock::~ResidualBlock()
+//{
+//	deviceFree();
+//	DestroyDescriptor();
+//}
+//
+//inline void ResidualBlock::ForwardPropagate() 
+//{
+//	static float alpha = 1.0;
+//
+//	checkCudaErrors(cublasScopy(neuralNetwork->cublasHandle, InputNumber * BATCH_SIZE, 
+//		LastLayer->device_data, 1, device_data, 1));
+//	checkCudaErrors(cublasSaxpy(neuralNetwork->cublasHandle, InputNumber * BATCH_SIZE,
+//		&alpha, device_branch_data, 1, device_data, 1));
+//
+//}
+//inline void ResidualBlock::BackPropagate() 
+//{
+//	device_diff_data = NextLayer->device_diff_data;
+//
+//}
+//inline void ResidualBlock::UpdateWeights(float learning_rate) 
+//{
+//	
+//}
+//
+//inline void ResidualBlock::deviceMalloc(int batchsize)
+//{
+//	checkCudaErrors(cudaMalloc(&device_data, sizeof(float) * batchsize * OutputNumber));
+//}
+//
+//inline void ResidualBlock::deviceFree()
+//{
+//	checkCudaErrors(cudaFree(device_data));
+//}
+//
+//inline void ResidualBlock::CreateDescriptor(int batchsize)
+//{
+//	TensorDesc = LastLayer->TensorDesc;
+//}
+//
+//inline void ResidualBlock::DestroyDescriptor()
+//{
+//
+//}
+//
+//
+//
+//
+//
+//BranchLayer::BranchLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer)
+//{
+//	neuralNetwork = neuralnetwork;
+//	LastLayer = lastlayer;
+//	LastLayer->NextLayer = this;
+//
+//	device_data = LastLayer->device_data;
+//
+//	OutputNumber = InputNumber = lastlayer->OutputNumber;
+//	OutputChannels = InputChannels = lastlayer->InputChannels;
+//	OutputWidth = InputWidth = lastlayer->OutputWidth;
+//	OutputHeight = InputHeight = lastlayer->OutputHeight;
+//	KernelSize = 0;
+//	Padding = 0;
+//	Stride = 1;
+//
+//	deviceMalloc(BATCH_SIZE);
+//	CreateDescriptor(BATCH_SIZE);
+//}
+//
+//BranchLayer::~BranchLayer()
+//{
+//	deviceFree();
+//	DestroyDescriptor();
+//}
+//
+//inline void BranchLayer::ForwardPropagate()
+//{
+//	device_data = LastLayer->device_data;
+//}
+//inline void BranchLayer::BackPropagate()
+//{
+//	static float alpha = 1.0;
+//	checkCudaErrors(cublasScopy(neuralNetwork->cublasHandle, InputNumber,
+//		NextLayer->device_diff_data, 1, device_diff_data, 1));
+//	if (ResBlock != nullptr)
+//	{
+//		checkCudaErrors(cublasSaxpy(neuralNetwork->cublasHandle, InputNumber,
+//			&alpha, ResBlock->device_diff_data, 1, device_diff_data, 1));
+//	}
+//}
+//inline void BranchLayer::UpdateWeights(float learning_rate)
+//{
+//
+//}
+//
+//inline void BranchLayer::deviceMalloc(int batchsize)
+//{
+//	//device_data = LastLayer->device_data;
+//	checkCudaErrors(cudaMalloc(&device_diff_data, sizeof(float) * batchsize * InputNumber));
+//}
+//
+//inline void BranchLayer::deviceFree()
+//{
+//	checkCudaErrors(cudaFree(device_diff_data));
+//}
+//
+//inline void BranchLayer::CreateDescriptor(int batchsize)
+//{
+//	TensorDesc = LastLayer->TensorDesc;
+//}
+//
+//inline void BranchLayer::DestroyDescriptor()
+//{
+//
+//}
+
+
+//BatchNormLayer::BatchNormLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer)
+//{
+//	neuralNetwork = neuralnetwork;
+//	LastLayer = lastlayer;
+//	LastLayer->NextLayer = this;
+//
+//	OutputNumber = InputNumber = lastlayer->OutputNumber;
+//	OutputChannels = InputChannels = lastlayer->InputChannels;
+//	OutputWidth = InputWidth = lastlayer->OutputWidth;
+//	OutputHeight = InputHeight = lastlayer->OutputHeight;
+//	KernelSize = 0;
+//	Padding = 0;
+//	Stride = 1;	
+//
+//	deviceMalloc(BATCH_SIZE);
+//	CreateDescriptor(BATCH_SIZE);
+//}
+//
+//BatchNormLayer::~BatchNormLayer()
+//{
+//	deviceFree();
+//	DestroyDescriptor();
+//}
+//
+//inline void BatchNormLayer::ForwardPropagate()
+//{
+//	static float alpha = 1.0, beta = 0.0;
+//	device_data = LastLayer->device_data;
+//
+//	//checkCudaErrors(cudnnBatchNormalizationForwardTraining(neuralNetwork->cudnnHandle, CUDNN_BATCHNORM_SPATIAL_PERSISTENT, 
+//	//	&alpha, &beta, LastLayer->TensorDesc, LastLayer->device_data, TensorDesc, device_data,
+//	//	));
+//}
+//
+//inline void BatchNormLayer::BackPropagate()
+//{
+//	device_diff_data = NextLayer->device_diff_data;
+//}
+//
+//inline void BatchNormLayer::Predict()
+//{
+//
+//}
+//
+//inline void BatchNormLayer::UpdateWeights(float learning_rate)
+//{
+//
+//}
+//
+//inline void BatchNormLayer::deviceMalloc(int batchsize)
+//{
+//	device_data = LastLayer->device_data;
+//}
+//
+//inline void BatchNormLayer::deviceFree()
+//{
+//
+//}
+//
+//inline void BatchNormLayer::CreateDescriptor(int batchsize)
+//{
+//	checkCUDNN(cudnnSetTensor4dDescriptor(TensorDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batchsize, OutputChannels, OutputHeight, OutputWidth));
+//	checkCUDNN(cudnnSetTensor4dDescriptor(ParamBTensorDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batchsize, OutputChannels, OutputHeight, OutputWidth));
+//}
+//
+//inline void BatchNormLayer::DestroyDescriptor()
+//{
+//	checkCUDNN(cudnnDestroyTensorDescriptor(TensorDesc));
+//}
+
+
+
+bool Layer::FromFile(const char *filefolder)
 {
 	std::stringstream ssf, ssbf;
-	ssf << fileprefix << ".bin";
-	ssbf << fileprefix << ".bias.bin";
+	ssf << filefolder << "/" << Name << ".oolon";
+	ssbf << filefolder << "/" << Name << ".bias.oolon";
+
+	// Read weights file
+	FILE *fp;
+	if (ParamW.size() > 0)
+	{
+		fp = fopen(ssf.str().c_str(), "rb");
+		if (!fp)
+		{
+			printf("ERROR: Cannot open file %s\n", ssf.str().c_str());
+			return false;
+		}
+		fread(&ParamW[0], sizeof(float), ParamW.size(), fp);
+		fclose(fp);
+		checkCudaErrors(cudaMemcpy(device_param_w, &ParamW[0], sizeof(float) * ParamW.size(), cudaMemcpyHostToDevice));
+	}
+	
+	// Read bias file
+	if (ParamB.size() > 0)
+	{
+		fp = fopen(ssbf.str().c_str(), "rb");
+		if (!fp)
+		{
+			printf("ERROR: Cannot open file %s\n", ssbf.str().c_str());
+			return false;
+		}
+		fread(&ParamB[0], sizeof(float), ParamB.size(), fp);
+		fclose(fp);
+		checkCudaErrors(cudaMemcpy(device_param_b, &ParamB[0], sizeof(float) * ParamB.size(), cudaMemcpyHostToDevice));
+	}
+	
+	return true;
+}
+
+void Layer::ToFile(const char *filefolder)
+{
+	std::stringstream ssf, ssbf;
+	ssf << filefolder << Name << ".oolon";
+	ssbf << filefolder << Name <<".bias.oolon";
+
+	FILE *fp;
 
 	// Write weights file
-	FILE *fp = fopen(ssf.str().c_str(), "wb");
-	if (!fp)
+	if (ParamW.size() > 0)
 	{
-		printf("ERROR: Cannot open file %s\n", ssf.str().c_str());
-		exit(2);
+		fp = fopen(ssf.str().c_str(), "wb");
+		if (!fp)
+		{
+			printf("ERROR: Cannot open file %s\n", ssf.str().c_str());
+			exit(2);
+		}
+		checkCudaErrors(cudaMemcpy(&ParamW[0], device_param_w, sizeof(float) * ParamW.size(), cudaMemcpyDeviceToHost));
+		fwrite(&ParamW[0], sizeof(float), ParamW.size(), fp);
+		fclose(fp);
 	}
-	fwrite(&ParamW[0], sizeof(float), ParamW.size(), fp);
-	fclose(fp);
-
 	// Write bias file
-	fp = fopen(ssbf.str().c_str(), "wb");
-	if (!fp)
+	if (ParamB.size() > 0)
 	{
-		printf("ERROR: Cannot open file %s\n", ssbf.str().c_str());
-		exit(2);
+		fp = fopen(ssbf.str().c_str(), "wb");
+		if (!fp)
+		{
+			printf("ERROR: Cannot open file %s\n", ssbf.str().c_str());
+			exit(2);
+		}
+		checkCudaErrors(cudaMemcpy(&ParamB[0], device_param_b, sizeof(float) * ParamB.size(), cudaMemcpyDeviceToHost));
+		fwrite(&ParamB[0], sizeof(float), ParamB.size(), fp);
+		fclose(fp);
 	}
-	fwrite(&ParamB[0], sizeof(float), ParamB.size(), fp);
-	fclose(fp);
 }
 
-
-
-
-
-BatchNormLayer::BatchNormLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer)
-{
-	neuralNetwork = neuralnetwork;
-	LastLayer = lastlayer;
-	LastLayer->NextLayer = this;
-
-	OutputNumber = InputNumber = lastlayer->OutputNumber;
-	OutputChannels = InputChannels = lastlayer->InputChannels;
-	OutputWidth = InputWidth = lastlayer->OutputWidth;
-	OutputHeight = InputHeight = lastlayer->OutputHeight;
-	KernelSize = 0;
-	Padding = 0;
-	Stride = 1;	
-
-	deviceMalloc(BATCH_SIZE);
-	CreateDescriptor(BATCH_SIZE);
-}
-
-BatchNormLayer::~BatchNormLayer()
-{
-	deviceFree();
-	DestroyDescriptor();
-}
-
-inline void BatchNormLayer::ForwardPropagate()
-{
-	static float alpha = 1.0, beta = 0.0;
-	device_data = LastLayer->device_data;
-
-	//checkCudaErrors(cudnnBatchNormalizationForwardTraining(neuralNetwork->cudnnHandle, CUDNN_BATCHNORM_SPATIAL_PERSISTENT, 
-	//	&alpha, &beta, LastLayer->TensorDesc, LastLayer->device_data, TensorDesc, device_data,
-	//	));
-}
-
-inline void BatchNormLayer::BackPropagate()
-{
-	device_diff_data = NextLayer->device_diff_data;
-}
-
-inline void BatchNormLayer::Predict()
-{
-
-}
-
-inline void BatchNormLayer::UpdateWeights(float learning_rate)
-{
-
-}
-
-inline void BatchNormLayer::deviceMalloc(int batchsize)
-{
-	device_data = LastLayer->device_data;
-}
-
-inline void BatchNormLayer::deviceFree()
-{
-
-}
-
-inline void BatchNormLayer::CreateDescriptor(int batchsize)
-{
-	checkCUDNN(cudnnSetTensor4dDescriptor(TensorDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batchsize, OutputChannels, OutputHeight, OutputWidth));
-	checkCUDNN(cudnnSetTensor4dDescriptor(ParamBTensorDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batchsize, OutputChannels, OutputHeight, OutputWidth));
-}
-
-inline void BatchNormLayer::DestroyDescriptor()
-{
-	checkCUDNN(cudnnDestroyTensorDescriptor(TensorDesc));
-}
