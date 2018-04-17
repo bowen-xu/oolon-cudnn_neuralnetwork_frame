@@ -573,15 +573,35 @@ inline void MaxPoolLayer::DestroyDescriptor()
 /*
 // DataSet
 */
-DataSet::DataSet()
+DataSet::DataSet(int width, int height, int channels)
+{
+	InputChannels = OutputChannels = channels;
+	InputWidth = OutputWidth = width;
+	InputHeight = OutputHeight = height;
+	InputNumber = InputHeight * InputWidth * InputChannels;
+	OutputNumber = OutputHeight * OutputWidth * OutputChannels;
+	Padding = 0;
+	KernelSize = 1;
+	Stride = 1;
+
+	CreateDescriptor(BATCH_SIZE);
+	deviceMalloc(BATCH_SIZE);
+}
+
+DataSet::~DataSet()
+{
+	DestroyDescriptor();
+	deviceFree();
+}
+
+void DataSet::LoadData(string TrainingSetName, string TrainingLabelsName, string TestSetName, string TestLabelsName)
 {
 	size_t width, height;
+
 	printf("Reading input data\n");
-	
+
 	size_t train_size = ReadUByteDataset(TrainingSetName.c_str(), TrainingLabelsName.c_str(), nullptr, nullptr, width, height);
 	size_t test_size = ReadUByteDataset(TestSetName.c_str(), TestLabelsName.c_str(), nullptr, nullptr, width, height);
-	TrainSize = train_size;
-	TestSize = test_size;
 	if (train_size == 0)
 		exit(1);
 
@@ -594,6 +614,9 @@ DataSet::DataSet()
 	KernelSize = 1;
 	Stride = 1;
 
+	TrainSize = train_size;
+	TestSize = test_size;
+
 	TrainSet.resize(train_size * OutputNumber);
 	TrainLabels.resize(train_size);
 	TestSet.resize(test_size * OutputNumber);
@@ -605,7 +628,7 @@ DataSet::DataSet()
 		exit(3);
 
 	printf("Done. Training dataset size: %d, Test dataset size: %d\n", (int)train_size, (int)test_size);
-	
+
 	// Normalize training set to be in [0,1]
 	printf("Normalizing training data...\n");
 	TrainSet_float.resize(TrainSet.size());
@@ -616,14 +639,11 @@ DataSet::DataSet()
 	for (size_t i = 0; i < train_size; ++i)
 		TrainLabels_float[i] = (float)TrainLabels[i];
 
-	CreateDescriptor(BATCH_SIZE);
-	deviceMalloc(BATCH_SIZE);
-}
-
-DataSet::~DataSet()
-{
 	DestroyDescriptor();
 	deviceFree();
+
+	CreateDescriptor(BATCH_SIZE);
+	deviceMalloc(BATCH_SIZE);
 }
 
 //inline void DataSet::ForwardPropagate()
@@ -671,7 +691,7 @@ inline void DataSet::DestroyDescriptor()
 /*
 // OutputLayer
 */
-OutputLayer::OutputLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string name)
+OutputLayer::OutputLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string name, float *labels)
 {
 	OutputNumber = InputNumber = lastlayer->OutputNumber;
 	OutputHeight = InputHeight = lastlayer->OutputHeight;
@@ -681,6 +701,8 @@ OutputLayer::OutputLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string 
 	KernelSize = 1;
 	Stride = 1;
 	Name = name;
+
+	device_labels = labels;
 	
 	neuralNetwork = neuralnetwork;
 	LastLayer.push_back(lastlayer);
@@ -715,7 +737,7 @@ inline void OutputLayer::BackPropagate()
 
 	for (auto&& lastlayer : LastLayer)
 	{
-		SoftmaxLossBackprop << <RoundUp(BATCH_SIZE, BW), BW >> > (neuralNetwork->device_labels, device_data, device_diff_data, lastlayer->OutputNumber, BATCH_SIZE);
+		SoftmaxLossBackprop <<<RoundUp(BATCH_SIZE, BW), BW >>> (device_labels, device_data, device_diff_data, lastlayer->OutputNumber, BATCH_SIZE);
 
 		checkCudaErrors(cudnnSoftmaxBackward(neuralNetwork->cudnnHandle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL,
 			&alpha, lastlayer->TensorDesc, device_data, lastlayer->TensorDesc, device_diff_data, &beta, lastlayer->TensorDesc, device_diff_data));

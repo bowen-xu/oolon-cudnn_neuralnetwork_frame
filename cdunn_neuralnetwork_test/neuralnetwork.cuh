@@ -234,7 +234,7 @@ private:
 class DataSet : public Layer
 {
 public:
-	DataSet();
+	DataSet(int width = 1, int height = 1, int channels = 1);
 	~DataSet();
 
 	vector<uint8_t> TrainSet;
@@ -244,6 +244,8 @@ public:
 	vector<float>	TrainSet_float;
 	vector<float>	TrainLabels_float;
 
+
+	void LoadData(string TrainingSetName, string TrainingLabelsName, string TestSetName, string TestLabelsName);
 	inline float *getLabels() { return device_labels; }
 	inline size_t getTrainSize() { return TrainSize; }
 	inline size_t getTestSize() { return TestSize; }
@@ -254,10 +256,10 @@ public:
 private:
 	float *device_labels;
 
-	string TrainingSetName = "train-images.idx3-ubyte";
-	string TrainingLabelsName = "train-labels.idx1-ubyte";
-	string TestSetName = "t10k-images.idx3-ubyte";
-	string TestLabelsName = "t10k-labels.idx1-ubyte";
+	//string TrainingSetName = "train-images.idx3-ubyte";
+	//string TrainingLabelsName = "train-labels.idx1-ubyte";
+	//string TestSetName = "t10k-images.idx3-ubyte";
+	//string TestLabelsName = "t10k-labels.idx1-ubyte";
 
 
 	size_t TrainSize;
@@ -272,7 +274,7 @@ private:
 class OutputLayer : public Layer
 {
 public:
-	OutputLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string name);
+	OutputLayer(NeuralNetwork *neuralnetwork, Layer *lastlayer, string name, float *labels);
 	~OutputLayer();
 
 	inline void ForwardPropagate();
@@ -281,6 +283,7 @@ public:
 
 private:
 	float *device_loss_data;
+	float *device_labels;
 
 	inline void deviceMalloc(int batchsize);
 	inline void deviceFree();
