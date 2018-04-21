@@ -11,15 +11,19 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="kernel.cu" />
+    <CudaCompile Include="main.cu" />
     <CudaCompile Include="neuralnetwork.cu" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="MCTS.cpp" />
     <ClCompile Include="readubyte.cpp" />
+    <ClCompile Include="Surakarta.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="MCTS.h" />
     <ClInclude Include="neuralnetwork.cuh" />
     <ClInclude Include="readubyte.h" />
+    <ClInclude Include="Surakarta.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{D2BCD6A8-DA9A-4C58-95C1-3414F1177496}</ProjectGuid>
